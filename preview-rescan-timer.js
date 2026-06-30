@@ -1,39 +1,44 @@
-// POPPA'S preview scanner controller.
-// Band-aware loader with direct ticket rendering, row selection, graph view, EM/IV color coding, and Next Records CTA.
+// POPPA'S preview scanner controller — Supabase-backed.
+// Single-record CTA workflow: Load Next / Records Still Loading / All Records Loaded.
 (function(){
+  var RESULTS_ENDPOINT = '/.netlify/functions/scan-results-db';
+  var FORCE_ENDPOINT = '/.netlify/functions/force-scan-db';
   var LIMIT = 50;
-  var pageOffset = 0;
   var nextOffset = null;
-  var pollTimer = null;
   var currentRows = [];
   var lastScanData = null;
   var buildMonitor = null;
-  var lastProgressKey = "";
-  var stalledPolls = 0;
+  var filterDebounce = null;
+  var sortState = { key: null, dir: 1 };
 
   function el(id){ return document.getElementById(id); }
   function text(id, value){ var x=el(id); if(x) x.textContent = value; }
   function html(id, value){ var x=el(id); if(x) x.innerHTML = value; }
   function val(id, fallback){ var x=el(id); return x && x.value !== undefined && x.value !== '' ? x.value : fallback; }
-  function msgOut(value, kind){ if(typeof msg === 'function') msg(value, kind || 'warn'); else console.log(value); }
-  function esc(v){ return String(v == null ? '—' : v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function esc(v){ return String(v == null || v === '' ? '—' : v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function money(v){ var n=Number(v); return Number.isFinite(n) ? '$' + n.toFixed(2) : '—'; }
   function pct(v,d){ var n=Number(v); return Number.isFinite(n) ? n.toFixed(d == null ? 2 : d) + '%' : '—'; }
-  function clock(sec){ var m=Math.floor(sec/60); var s=String(sec%60).padStart(2,'0'); return m + ':' + s; }
+  function msgOut(value, kind){ if(typeof msg === 'function') msg(value, kind || 'warn'); else console.log(value); }
 
   function injectUiFixes(){
-    if(document.getElementById('preview-ui-restore-css')) return;
+    if(document.getElementById('preview-supabase-css')) return;
     var st=document.createElement('style');
-    st.id='preview-ui-restore-css';
+    st.id='preview-supabase-css';
     st.textContent='.table-wrap{position:relative}.table-wrap th{position:sticky;top:0;z-index:8;background:#061225}.em-out{color:var(--green)!important;font-weight:900}.em-near{color:var(--amber)!important;font-weight:900}.em-in{color:var(--red)!important;font-weight:900}.iv-inflated{color:var(--amber);font-weight:900}.iv-fair{color:var(--green);font-weight:900}.iv-deflated{color:var(--red);font-weight:900}.result-row{cursor:pointer}.result-row.row-active td{background:rgba(123,220,255,.13)!important;box-shadow:inset 3px 0 0 var(--cyan)}#loadNextBtn{display:inline-block!important;margin-left:10px}';
     document.head.appendChild(st);
   }
 
   function hideExtraControls(){
-    var run=el('runScanBtn'), reset=el('resetBtn'), rescan=el('rescanBtn');
-    if(run) run.style.display='none';
-    if(reset) reset.style.display='none';
-    if(rescan){ rescan.style.display=''; rescan.textContent='↻ Re-scan Live Data'; rescan.classList.add('primary'); }
+    ['runScanBtn','resetBtn','rescanBtn'].forEach(function(id){ var b=el(id); if(b){ b.style.display='none'; b.disabled=true; } });
+  }
+
+  function ensureIvAll(){
+    var s=el('ivStatusSel');
+    if(!s) return;
+    var hasAll=false;
+    Array.prototype.forEach.call(s.options,function(o){ if(String(o.value).toLowerCase()==='all') hasAll=true; });
+    if(!hasAll){ var opt=document.createElement('option'); opt.value='All'; opt.textContent='All'; s.insertBefore(opt, s.firstChild); }
+    s.value='All';
   }
 
   function readDte(){
@@ -47,6 +52,7 @@
     if(r.indexOf('roc')>=0) return 'roc';
     if(r.indexOf('prob')>=0) return 'prob';
     if(r.indexOf('iv')>=0) return 'iv';
+    if(r.indexOf('credit')>=0) return 'credit';
     return 'edge';
   }
 
@@ -70,18 +76,26 @@
     q.set('idx', val('idxSel','both'));
     q.set('width', width === '0' ? '0' : width);
     q.set('rankBy', normalizeRank());
-    q.set('passersTop', 'yes');
+    q.set('ivStatus', val('ivStatusSel','All'));
+    q.set('emStatus', val('emStatusSel', val('expectedMoveStatus','Outside Expected Move')));
     q.set('_ts', String(Date.now()));
     return q;
   }
 
   async function getJson(url, ms){
     var controller = new AbortController();
-    var timeout = setTimeout(function(){ controller.abort(); }, ms || 15000);
+    var timeout = setTimeout(function(){ controller.abort(); }, ms || 20000);
     try{
       var res = await fetch(url, { cache:'no-store', headers:{ accept:'application/json' }, signal: controller.signal });
-      return await res.json();
+      var data = await res.json().catch(function(){ return null; });
+      if(!res.ok) throw new Error((data && data.error) || ('HTTP '+res.status));
+      return data || {};
     } finally { clearTimeout(timeout); }
+  }
+
+  function postScan(action){
+    var suffix = action ? ('?action=' + encodeURIComponent(action)) : '';
+    return getJson(FORCE_ENDPOINT + suffix, 30000).catch(function(e){ console.warn('scan control', e); return null; });
   }
 
   function ivStatusFor(r){
@@ -101,14 +115,14 @@
     if(!body) return;
     currentRows = append ? currentRows.concat(rows || []) : (rows || []);
     if(!currentRows.length){
-      body.innerHTML = '<tr><td colspan="99" class="empty">No rows match the current Band Intake values.</td></tr>';
+      body.innerHTML = '<tr><td colspan="99" class="empty">No rows match the current Band Intake values yet.</td></tr>';
       renderTicket(null);
       return;
     }
     body.innerHTML = currentRows.map(function(r, i){
       var prob = r.prob != null ? r.prob : (r.probOtm != null ? Math.round(Number(r.probOtm) * 100) : null);
       var oi = r.openInterest || r.monthlyOI || r.oi || 0;
-      var review = r.reviewStatus || r.note || (r.passed ? 'Matches primary filters ✓' : 'Candidate for manual review');
+      var review = r.reviewStatus || r.note || 'Matches current Band Intake values ✓';
       var ivs = ivStatusFor(r);
       var ems = r.expectedMoveStatus || r.emStatus || 'Verify';
       return '<tr class="result-row" data-row="'+i+'">' +
@@ -125,7 +139,7 @@
         '<td>'+Number(oi || 0).toLocaleString()+'</td>' +
         '<td>'+pct(prob,0)+'</td>' +
         '<td>'+money(r.credit)+'</td>' +
-        '<td>'+money(r.width != null && r.credit != null ? Number(r.width)-Number(r.credit) : r.risk)+'</td>' +
+        '<td>'+money(r.maxRisk != null ? r.maxRisk : (r.width != null && r.credit != null ? Number(r.width)-Number(r.credit) : r.risk))+'</td>' +
         '<td>'+pct(r.roc,2)+'</td>' +
         '<td>'+money(r.spreadMax)+'</td>' +
         '<td class="signal review">'+esc(review)+'</td>' +
@@ -166,27 +180,27 @@
     var p=findTicketPanel();
     if(!p) return;
     if(!r){
-      p.innerHTML='<p class="eyebrow">Order Ticket · 4-Leg Iron Condor</p><h2 class="title">Tap a result to build the ticket.</h2><div class="note">Run a scan, then select a candidate.</div>';
+      p.innerHTML='<p class="eyebrow">Order Ticket · 4-Leg Iron Condor</p><h2 class="title">Tap a result to build the ticket.</h2><div class="note">Rows will populate as the Supabase scan writes candidates.</div>';
       return;
     }
-    var risk = r.width != null && r.credit != null ? Number(r.width)-Number(r.credit) : Number(r.risk || 0);
+    var risk = r.maxRisk != null ? Number(r.maxRisk) : (r.width != null && r.credit != null ? Number(r.width)-Number(r.credit) : Number(r.risk || 0));
     var prob = r.prob != null ? r.prob : (r.probOtm != null ? Math.round(Number(r.probOtm)*100) : null);
     var spot = Number(r.spot || 0), low=Number(r.expectedLow || 0), high=Number(r.expectedHigh || 0);
     var min=Math.min(low||spot, spot, Number(r.shortPut||spot));
     var max=Math.max(high||spot, spot, Number(r.shortCall||spot));
     var pctSpot = max>min ? Math.max(0, Math.min(100, (spot-min)/(max-min)*100)) : 50;
-    p.innerHTML='<p class="eyebrow">Order Ticket · 4-Leg Iron Condor</p><h2 class="title">'+esc(r.symbol)+' Candidate Ticket</h2>'+ '<div class="note"><strong>Educational review only:</strong> verify live option chain pricing, liquidity, earnings, and risk before any decision.</div>'+ '<div class="ticket">'+ '<div class="leg sell"><span>Sell Put</span><strong>'+esc(r.shortPut || 'Verify')+'</strong></div>'+ '<div class="leg"><span>Buy Put</span><strong>'+esc(r.longPut || 'Verify')+'</strong></div>'+ '<div class="leg sell"><span>Sell Call</span><strong>'+esc(r.shortCall || 'Verify')+'</strong></div>'+ '<div class="leg"><span>Buy Call</span><strong>'+esc(r.longCall || 'Verify')+'</strong></div>'+ '</div>'+ '<div class="ticket-math">'+ '<div class="tm"><span>Credit</span><strong>'+money(r.credit)+'</strong></div>'+ '<div class="tm"><span>Max Risk</span><strong>'+money(risk)+'</strong></div>'+ '<div class="tm"><span>ROC</span><strong>'+pct(r.roc,2)+'</strong></div>'+ '<div class="tm"><span>Anchor P(OTM)</span><strong>'+pct(prob,0)+'</strong></div>'+ '</div>'+ '<div class="viz"><span class="eyebrow">Expected Move / Spot View</span><div class="bar"><span class="spot" style="left:'+pctSpot+'%"></span></div><div class="vizlabels"><span>Expected Low '+money(low)+'</span><span>Spot '+money(spot)+'</span><span>Expected High '+money(high)+'</span></div></div>'+ '<ul class="review-list"><li>EM Status: <b class="'+emClass(r.expectedMoveStatus)+'">'+esc(r.expectedMoveStatus || 'Verify')+'</b></li><li>IV Status: <b class="'+ivClass(ivStatusFor(r))+'">'+esc(ivStatusFor(r))+'</b></li><li>Review Status: '+esc(r.reviewStatus || r.note || 'Candidate for manual review')+'</li></ul>';
+    p.innerHTML='<p class="eyebrow">Order Ticket · 4-Leg Iron Condor</p><h2 class="title">'+esc(r.symbol)+' Candidate Ticket</h2>'+ '<div class="note"><strong>Educational review only:</strong> verify live option chain pricing, liquidity, earnings, and risk before any decision.</div>'+ '<div class="ticket">'+ '<div class="leg sell"><span>Sell Put</span><strong>'+esc(r.shortPut || 'Verify')+'</strong></div>'+ '<div class="leg"><span>Buy Put</span><strong>'+esc(r.longPut || 'Verify')+'</strong></div>'+ '<div class="leg sell"><span>Sell Call</span><strong>'+esc(r.shortCall || 'Verify')+'</strong></div>'+ '<div class="leg"><span>Buy Call</span><strong>'+esc(r.longCall || 'Verify')+'</strong></div>'+ '</div>'+ '<div class="ticket-math">'+ '<div class="tm"><span>Credit</span><strong>'+money(r.credit)+'</strong></div>'+ '<div class="tm"><span>Max Risk</span><strong>'+money(risk)+'</strong></div>'+ '<div class="tm"><span>ROC</span><strong>'+pct(r.roc,2)+'</strong></div>'+ '<div class="tm"><span>Anchor P(OTM)</span><strong>'+pct(prob,0)+'</strong></div>'+ '</div>'+ '<div class="viz"><span class="eyebrow">Expected Move / Spot View</span><div class="bar"><span class="spot" style="left:'+pctSpot+'%"></span></div><div class="vizlabels"><span>Expected Low '+money(low)+'</span><span>Spot '+money(spot)+'</span><span>Expected High '+money(high)+'</span></div></div>'+ '<ul class="review-list"><li>EM Status: <b class="'+emClass(r.expectedMoveStatus)+'">'+esc(r.expectedMoveStatus || 'Verify')+'</b></li><li>IV Status: <b class="'+ivClass(ivStatusFor(r))+'">'+esc(ivStatusFor(r))+'</b></li><li>Review Status: '+esc(r.reviewStatus || r.note || 'Matches current Band Intake values ✓')+'</li></ul>';
   }
 
   function updateStats(data){
     var total = data.total || 0;
     var matched = data.matched || 0;
     var returned = currentRows.length || data.returned || (data.results ? data.results.length : 0);
-    text('truthDataMode', data.filterMode || 'band-aware-preview-slice');
+    text('truthDataMode', data.filterMode || 'supabase-band-aware-page');
     text('truthLastScan', data.generatedAt ? new Date(data.generatedAt).toLocaleString() : '—');
     text('truthUniverse', (data.universeCount || '—') + ' symbols');
-    text('truthBuild', data.building ? 'Building — rows available' : 'Ready');
-    text('scanMode', data.building ? 'Building — live rows shown' : 'Live board ready');
+    text('truthBuild', data.building ? 'Building — rows available' : (data.noScan ? 'Not started' : 'Ready'));
+    text('scanMode', data.building ? 'Building — Supabase rows shown' : (data.noScan ? 'Starting Supabase scan' : 'Supabase board ready'));
     text('universeCount', data.universeCount || data.scanned || '—');
     text('pulledCount', data.scanned || '—');
     text('condorCount', data.withCondor || total || '—');
@@ -197,25 +211,29 @@
   function showStatus(data){
     var progress = data.progress || {};
     var buildText = data.building ? ' Scan still building' + (progress.scanned && progress.total ? ': ' + progress.scanned + ' of ' + progress.total + ' symbols scanned.' : '.') : ' Scan board ready.';
+    if(data.noScan){
+      html('explanation','No Supabase scan exists yet. Starting the first preview scan now.');
+      msgOut('Starting Supabase scan.', 'warn');
+      return;
+    }
     if((data.returned || 0) > 0){
       html('explanation','Loaded <strong>'+(currentRows.length||data.returned||0).toLocaleString()+'</strong> displayed rows from <strong>'+(data.matched||0).toLocaleString()+'</strong> candidates matching the current Band Intake values. '+buildText);
-      msgOut('Live rows loaded. '+(currentRows.length||data.returned||0)+' displayed; '+(data.matched||0)+' matched.', 'ok');
+      msgOut('Supabase rows loaded. '+(currentRows.length||data.returned||0)+' displayed; '+(data.matched||0)+' matched.', 'ok');
       return;
     }
-    if((data.total || 0) > 0){
-      html('explanation','Live board is available, but <strong>no rows match</strong> the current Band Intake values. Widen ROC, IV, bid/ask, earnings, OI, or width filters. '+buildText);
-      msgOut('Live board available, but no rows match the current Band Intake values.', 'warn');
+    if((data.total || 0) > 0 || data.building){
+      html('explanation','Supabase scan is available, but <strong>no rows match</strong> the current Band Intake values yet. Widen ROC, IV, bid/ask, earnings, OI, EM Status, IV Status, or width filters. '+buildText);
+      msgOut('Supabase board available, but no rows match current Band Intake values.', 'warn');
       return;
     }
-    html('explanation','No scanner board is available yet. A fresh scan has been requested. Typical scan time is about 5 minutes.');
-    msgOut('No scanner board is available yet. Fresh scan requested.', 'warn');
+    html('explanation','Waiting for Supabase-backed scanner rows.');
+    msgOut('Waiting for Supabase-backed scanner rows.', 'warn');
   }
 
   function setupNextButton(){
     var b=el('loadNextBtn');
-    var rescan=el('rescanBtn');
-    if(!b && rescan){ b=document.createElement('button'); b.id='loadNextBtn'; b.className='btn secondary'; rescan.insertAdjacentElement('afterend', b); }
-    if(rescan){ rescan.style.display='none'; rescan.disabled=true; }
+    var anchor=el('rescanBtn') || document.querySelector('.actions .btn') || document.querySelector('button');
+    if(!b){ b=document.createElement('button'); b.id='loadNextBtn'; b.className='btn secondary'; if(anchor) anchor.insertAdjacentElement('afterend', b); }
     if(!b) return;
     var has = nextOffset !== null && nextOffset !== undefined;
     var building = !!(lastScanData && lastScanData.building);
@@ -235,90 +253,100 @@
     }
   }
 
-  async function loadBoard(){
-    var rescan = el('rescanBtn');
-    if(rescan){ rescan.disabled = true; rescan.textContent = 'Scanning…'; }
-    hideExtraControls(); injectUiFixes(); pageOffset = 0;
-    var data = await getJson('/.netlify/functions/scan-results-preview?' + readBandParams(0).toString(), 15000);
-    currentRows=[];
-    renderRows(data.results || [], false);
+  async function loadBoard(append, offset){
+    hideExtraControls(); injectUiFixes();
+    var data = await getJson(RESULTS_ENDPOINT + '?' + readBandParams(offset || 0).toString(), 25000);
+    if(data.noScan){ await postScan('start'); }
+    renderRows(data.results || [], !!append);
     nextOffset = data.nextOffset;
     lastScanData = data;
     updateStats(data);
     showStatus(data);
     setupNextButton();
     monitorBuild(data);
-    if(rescan){ rescan.disabled = false; rescan.textContent = '↻ Re-scan Live Data'; }
     return data;
   }
 
   async function appendNextRows(){
     if(nextOffset === null || nextOffset === undefined) return;
-    pageOffset = nextOffset;
     var b=el('loadNextBtn'); if(b){ b.disabled=true; b.textContent='Loading…'; }
-    var data = await getJson('/.netlify/functions/scan-results-preview?' + readBandParams(pageOffset).toString(), 15000);
-    renderRows(data.results || [], true);
-    nextOffset = data.nextOffset;
-    lastScanData = data;
-    updateStats(data);
-    showStatus(data);
-    setupNextButton();
+    try{ await loadBoard(true, nextOffset); }
+    catch(e){ console.warn(e); msgOut('Unable to load next records from Supabase.', 'warn'); setupNextButton(); }
   }
 
-  async function continueBuild(){
-    try{ await fetch('/.netlify/functions/force-eod-pull?action=continue',{method:'POST',cache:'no-store'}); }catch(e){ console.warn(e); }
-  }
-  function buildKey(data){ var p=(data&&data.progress)||{}; return String(p.scanned||data.scanned||'')+'/'+String(p.total||data.universeCount||'')+'/'+String(data.total||''); }
   function monitorBuild(data){
-    if(!data || !data.building){ if(buildMonitor){ clearInterval(buildMonitor); buildMonitor=null; } return; }
+    if(!data || (!data.building && !data.noScan)){ if(buildMonitor){ clearInterval(buildMonitor); buildMonitor=null; } return; }
     if(buildMonitor) return;
-    lastProgressKey=buildKey(data); stalledPolls=0;
     buildMonitor=setInterval(async function(){
       try{
-        var status=await getJson('/.netlify/functions/force-eod-pull?status=1&_ts='+Date.now(),12000);
-        var key=String(status && status.progress && status.progress.scanned || status && status.scanned || '')+'/'+String(status && status.progress && status.progress.total || status && status.universeCount || '')+'/'+String(status && status.latestResults || '');
-        if(key===lastProgressKey) stalledPolls++; else { stalledPolls=0; lastProgressKey=key; }
-        if(stalledPolls>=1 || String(status && status.recommendation || '').indexOf('STALE')>=0){ await continueBuild(); stalledPolls=0; }
-        await loadBoard();
-      }catch(e){ console.warn('build monitor wait',e); }
+        var status=await getJson(FORCE_ENDPOINT + '?status=1&_ts=' + Date.now(), 15000);
+        if(status && (status.status === 'empty' || status.building || status.stale)) await postScan(status.stale ? 'continue' : 'start');
+        await loadBoard(false, 0);
+        if(lastScanData && !lastScanData.building && !lastScanData.noScan){ clearInterval(buildMonitor); buildMonitor=null; }
+      }catch(e){ console.warn('Supabase build monitor wait',e); }
     },20000);
   }
 
-  async function startTimedScan(){
-    try { await fetch('/.netlify/functions/scan-build-background', { method:'POST' }); } catch(e) { console.warn(e); }
-    var elapsed = 0;
-    if(pollTimer) clearInterval(pollTimer);
-    var rescan = el('rescanBtn');
-    if(rescan){ rescan.disabled = true; rescan.textContent = 'Scanning… ~5 min'; }
-    pollTimer = setInterval(async function(){
-      elapsed += 10;
-      if(rescan) rescan.textContent = 'Scanning… ' + clock(elapsed);
-      try{
-        var data = await loadBoard();
-        if((data.total || 0) > 0){ clearInterval(pollTimer); pollTimer = null; }
-      }catch(e){ console.warn('Waiting for scan board', e); }
-      if(elapsed >= 360){ clearInterval(pollTimer); pollTimer = null; if(rescan){ rescan.disabled = false; rescan.textContent = '↻ Re-scan Live Data'; } }
-    }, 10000);
+  function valueForSort(r, key){
+    if(key==='symbol') return String(r.symbol||'');
+    if(key==='sector') return String(r.sector||r.market||'');
+    if(key==='dte') return Number(r.dte||0);
+    if(key==='iv') return Number(r.iv||0);
+    if(key==='em') return String(r.expectedMoveStatus||'');
+    if(key==='oi') return Number(r.openInterest||0);
+    if(key==='prob') return Number(r.prob||0);
+    if(key==='credit') return Number(r.credit||0);
+    if(key==='risk') return Number(r.maxRisk||r.risk||0);
+    if(key==='roc') return Number(r.roc||0);
+    if(key==='spread') return Number(r.spreadMax||0);
+    return Number(r.score||0);
   }
 
-  async function rescan(){
-    try{
-      var data = await loadBoard();
-      if(!(data.total || 0)) startTimedScan();
-    }catch(e){
+  function bindHeaderSort(){
+    var heads=document.querySelectorAll('th');
+    Array.prototype.forEach.call(heads,function(th,idx){
+      th.onclick=function(){
+        if(!currentRows.length) return;
+        var keys=['rank','symbol','sector','spot','dte','earnings','iv','move','em','ivstatus','oi','prob','credit','risk','roc','spread','review'];
+        var key=keys[idx] || 'score';
+        sortState.dir = sortState.key === key ? -sortState.dir : 1;
+        sortState.key = key;
+        currentRows.sort(function(a,b){
+          var av=valueForSort(a,key), bv=valueForSort(b,key);
+          if(typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * sortState.dir;
+          return ((av||0)-(bv||0)) * sortState.dir;
+        });
+        renderRows(currentRows, false);
+      };
+    });
+  }
+
+  function bindBandChanges(){
+    var ids=['idxSel','rocMin','rocMax','spreadWidth','minProb','ivMin','ivStatusSel','minOI','minShortOI','maxSpread','dteWindow','excludeEarnings','emStatusSel','rankBy','maxResults'];
+    ids.forEach(function(id){
+      var x=el(id); if(!x) return;
+      x.addEventListener('change', function(){
+        clearTimeout(filterDebounce);
+        filterDebounce=setTimeout(function(){ currentRows=[]; nextOffset=null; loadBoard(false,0).catch(console.warn); }, 350);
+      });
+      if(x.tagName === 'INPUT') x.addEventListener('input', function(){
+        clearTimeout(filterDebounce);
+        filterDebounce=setTimeout(function(){ currentRows=[]; nextOffset=null; loadBoard(false,0).catch(console.warn); }, 650);
+      });
+    });
+  }
+
+  async function boot(){
+    injectUiFixes(); hideExtraControls(); ensureIvAll(); setupNextButton(); bindHeaderSort(); bindBandChanges();
+    html('explanation','Loading scanner rows from Supabase using the default Band Intake values.');
+    try{ await loadBoard(false,0); }
+    catch(e){
       console.warn(e);
-      html('explanation','Unable to read the live board yet. Starting a fresh timed scan. Typical scan time is about 5 minutes.');
-      renderRows([], false);
-      startTimedScan();
+      html('explanation','Supabase read endpoint is not ready yet. Starting the Supabase scan controller.');
+      await postScan('start');
+      monitorBuild({ building:true });
     }
   }
 
-  function boot(){
-    injectUiFixes(); hideExtraControls(); setupNextButton();
-    var btn = el('rescanBtn'); if(btn) btn.onclick = rescan;
-    html('explanation','Loading scanner using the default Band Intake values. After changing any Band field, press <strong>Re-scan Live Data</strong>.');
-    setTimeout(rescan, 300);
-  }
-
-  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 800);
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 500);
 })();
