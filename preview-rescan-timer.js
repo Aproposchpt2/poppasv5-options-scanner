@@ -1,5 +1,5 @@
 // POPPA'S preview timed rescan controller.
-// Restores the original homepage scan UX: timed rescan, five-minute notice, polling, then render.
+// Single-CTA model: auto-load on page open, one Re-scan CTA for current Band Intake settings.
 // Adds adaptive pull-size calibration so the page can determine a stable record batch size.
 (function(){
   var LIMIT = 25;
@@ -15,6 +15,21 @@
   function setText(id, text){ var x=el(id); if(x) x.textContent=text; }
   function setHTML(id, html){ var x=el(id); if(x) x.innerHTML=html; }
   function clock(sec){ var m=Math.floor(sec/60); var s=String(sec%60).padStart(2,'0'); return m + ':' + s; }
+
+  function hideExtraControls(){
+    var run = el('runScanBtn');
+    var reset = el('resetBtn');
+    var load = el('loadNextBtn');
+    if(run) run.style.display = 'none';
+    if(reset) reset.style.display = 'none';
+    if(load) load.style.display = 'none';
+    var rescan = el('rescanBtn');
+    if(rescan){
+      rescan.textContent = '↻ Re-scan Live Data';
+      rescan.classList.add('primary');
+      rescan.style.display = '';
+    }
+  }
 
   function setNextButton(){
     var b = el('loadNextBtn');
@@ -32,6 +47,7 @@
     b.disabled = !has;
     b.textContent = has ? ('Load Next ' + LIMIT + ' Records') : 'All Records Loaded';
     b.onclick = function(){ if(has){ pageOffset = nextOffset; loadLivePage(true); } };
+    b.style.display = 'none';
   }
 
   async function fetchWithTimeout(url, ms){
@@ -52,7 +68,7 @@
     for(var i=0;i<PULL_STEPS.length;i++){
       var size = PULL_STEPS[i];
       try{
-        setHTML('explanation','Testing live pull size: <strong>' + size + '</strong> records. The scanner will use the largest stable size.');
+        setHTML('explanation','Testing live pull size: <strong>' + size + '</strong> records. The scanner will use the largest stable size for this session.');
         var test = await fetchWithTimeout('/.netlify/functions/scan-results-preview?limit=' + size + '&offset=0&_ts=' + Date.now(), 9000);
         if(test && Array.isArray(test.results) && test.results.length){
           best = size;
@@ -93,38 +109,40 @@
     setText('truthUniverse', (data.universeCount || '—') + ' symbols');
     setText('truthBuild', data.building ? 'Finalizing with live rows' : 'Ready');
     setText('scanMode', data.building ? 'Live board finalizing' : 'Live board ready');
-    setHTML('explanation','Stable pull size: <strong>' + LIMIT + '</strong> records. Loaded <strong>' + allRows.length.toLocaleString() + '</strong> of <strong>' + totalRows.toLocaleString() + '</strong> live records before display filtering. ' + (data.userMessage || ''));
+    setHTML('explanation','Stable pull size: <strong>' + LIMIT + '</strong> records. Showing results from the current Band Intake values. Loaded <strong>' + allRows.length.toLocaleString() + '</strong> of <strong>' + totalRows.toLocaleString() + '</strong> live records before display filtering. ' + (data.userMessage || ''));
 
     setNextButton();
     if(typeof apply === 'function') apply();
     if(typeof showTicket === 'function' && typeof lastRows !== 'undefined' && lastRows.length) showTicket(0);
-    say('Live board loaded. ' + allRows.length.toLocaleString() + ' of ' + totalRows.toLocaleString() + ' records available in the table. Pull size: ' + LIMIT + '.', 'ok');
+    say('Live board loaded using current Band Intake values. Pull size: ' + LIMIT + '.', 'ok');
+    hideExtraControls();
     return data;
   }
 
-  async function runLatest(){
-    var run = el('runScanBtn');
-    if(run) run.disabled = true;
+  async function runCurrentBandScan(){
+    var rescan = el('rescanBtn');
+    if(rescan) rescan.disabled = true;
     pageOffset = 0; nextOffset = null; allRows = []; setNextButton();
-    say('Checking latest available live board…', 'warn');
+    say('Checking latest live board using current Band Intake values…', 'warn');
     try { await loadLivePage(false); }
     catch(e){
       console.warn(e);
-      say('Live board is not ready yet. Press Re-scan Live Data to start a timed scan. Typical scan time is about 5 minutes.', 'warn');
-      setHTML('explanation','Live board is not ready yet. Use <strong>Re-scan Live Data</strong> to start a timed scan. Typical scan time is about 5 minutes.');
+      say('Live board is not ready yet. Starting timed scan. Typical scan time is about 5 minutes.', 'warn');
+      await startTimedRescan();
+      return;
     }
-    if(run) run.disabled = false;
+    if(rescan){ rescan.disabled = false; rescan.textContent = '↻ Re-scan Live Data'; }
+    hideExtraControls();
   }
 
   async function startTimedRescan(){
     var b = el('rescanBtn');
-    var run = el('runScanBtn');
+    hideExtraControls();
     if(b){ b.disabled = true; b.textContent = 'Scanning… ~5 min'; }
-    if(run) run.disabled = true;
     pageOffset = 0; nextOffset = null; allRows = []; calibrated = false; LIMIT = 25; setNextButton();
     say('Fresh scan in progress. Pulling delayed/EOD option chains. This can take approximately 5 minutes.', 'warn');
     setText('scanMode','Fresh scan running…');
-    setHTML('explanation','⏳ <strong>Fresh scan in progress:</strong> pulling delayed/EOD option chains. This can take approximately 5 minutes.');
+    setHTML('explanation','⏳ <strong>Fresh scan in progress:</strong> pulling delayed/EOD option chains. This can take approximately 5 minutes. The completed board will be filtered using the current Band Intake values.');
     var body = el('resultsBody');
     if(body) body.innerHTML = '<tr><td colspan="99" class="empty">Fresh scan in progress. Waiting for live scan board…</td></tr>';
 
@@ -143,27 +161,27 @@
           await loadLivePage(false);
           clearInterval(pollTimer); pollTimer = null;
           if(b){ b.disabled = false; b.textContent = '↻ Re-scan Live Data'; }
-          if(run) run.disabled = false;
+          hideExtraControls();
         }
       } catch(e){ console.warn('Still waiting for scan board', e); }
 
       if(elapsed >= 360){
         clearInterval(pollTimer); pollTimer = null;
         if(b){ b.disabled = false; b.textContent = '↻ Re-scan Live Data'; }
-        if(run) run.disabled = false;
-        say('Scan is still building. Please wait a little longer, then press Run Scanner Now or Re-scan Live Data again.', 'warn');
+        say('Scan is still building. Please wait a little longer, then press Re-scan Live Data again.', 'warn');
+        hideExtraControls();
       }
     }, 10000);
   }
 
   function boot(){
+    hideExtraControls();
     var rescan = el('rescanBtn');
-    var run = el('runScanBtn');
-    if(rescan) rescan.onclick = startTimedRescan;
-    if(run){ run.disabled = false; run.onclick = runLatest; }
+    if(rescan) rescan.onclick = runCurrentBandScan;
     setNextButton();
-    setHTML('explanation','Press <strong>Run Scanner Now</strong> to check the latest cached board, or <strong>Re-scan Live Data</strong> to start a fresh timed scan. A fresh delayed/EOD scan can take approximately 5 minutes. The page will calibrate the largest stable record pull automatically.');
-    say('Ready. Press Run Scanner Now or Re-scan Live Data. Fresh scans can take approximately 5 minutes.', 'warn');
+    setHTML('explanation','The scanner will automatically load using the default Band Intake values. After changing any Band Intake field, press <strong>Re-scan Live Data</strong> to refresh the displayed candidates.');
+    say('Loading scanner using default Band Intake values…', 'warn');
+    setTimeout(runCurrentBandScan, 300);
   }
 
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else setTimeout(boot, 800);
