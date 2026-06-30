@@ -5,8 +5,6 @@
 // Upstream ingestion rule remains narrow: monthly option chain only, 15-45 DTE only.
 // All ROC, probability, IV, OI, bid/ask spread, earnings, width, EM Status, and ranking filters stay in user Band Intake / scan-results-db.js.
 
-import { createClient } from "@supabase/supabase-js";
-
 export const config = {
   schedule: "5 21 * * 1-5"
 };
@@ -18,11 +16,27 @@ function json(body, status = 200) {
   });
 }
 
-function supabase() {
+function sbConfig() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
+  return { url: url.replace(/\/$/, ""), key };
+}
+
+async function sbFetch(path, opts = {}) {
+  const { url, key } = sbConfig();
+  const res = await fetch(`${url}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...(opts.headers || {})
+    }
+  });
+  const text = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`${opts.method || "GET"} ${path} failed ${res.status}: ${text}`);
+  return { text, headers: res.headers };
 }
 
 function baseUrl(req) {
@@ -34,18 +48,20 @@ function baseUrl(req) {
   }
 }
 
+async function countRows(table) {
+  const { headers } = await sbFetch(`${table}?select=id`, { method: "HEAD", headers: { Prefer: "count=exact" } });
+  const cr = headers.get("content-range") || "";
+  const m = cr.match(/\/(\d+)$/);
+  return m ? Number(m[1]) : 0;
+}
+
 async function purgePriorDataset() {
-  const sb = supabase();
-  const { count: priorRuns } = await sb.from("scan_runs").select("id", { count: "exact", head: true });
-  const { count: priorCandidates } = await sb.from("scan_candidates").select("id", { count: "exact", head: true });
-
-  // scan_candidates is configured with ON DELETE CASCADE from scan_runs, so deleting runs replaces the full dataset.
-  const { error } = await sb.from("scan_runs").delete().not("id", "is", null);
-  if (error) throw error;
-
+  const priorRuns = await countRows("scan_runs").catch(() => 0);
+  const priorCandidates = await countRows("scan_candidates").catch(() => 0);
+  await sbFetch("scan_runs?id=not.is.null", { method: "DELETE", headers: { Prefer: "return=minimal" } });
   return {
-    priorRuns: priorRuns || 0,
-    priorCandidates: priorCandidates || 0,
+    priorRuns,
+    priorCandidates,
     replacementRule: "Fresh scheduled EOD pull replaces the prior Supabase dataset."
   };
 }
