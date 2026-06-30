@@ -22,3 +22,5 @@ jobs:
               if r.status >= 400:
                   raise SystemExit(r.status)
           PY
+      - name: Trigger timestamp
+        run: echo "manual trigger requested at 2026-06-30T00:00:00Z"
