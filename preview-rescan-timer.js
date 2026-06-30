@@ -1,7 +1,7 @@
 // POPPA'S preview timed rescan controller.
 // Restores the original homepage scan UX: timed rescan, five-minute notice, polling, then render.
 (function(){
-  var LIMIT = 500;
+  var LIMIT = 25;
   var pageOffset = 0;
   var nextOffset = null;
   var totalRows = 0;
@@ -27,7 +27,7 @@
     if(!b) return;
     var has = nextOffset !== null && nextOffset !== undefined;
     b.disabled = !has;
-    b.textContent = has ? 'Load Next 500 Records' : 'All Records Loaded';
+    b.textContent = has ? 'Load Next 25 Records' : 'All Records Loaded';
     b.onclick = function(){ if(has){ pageOffset = nextOffset; loadLivePage(true); } };
   }
 
@@ -37,7 +37,8 @@
     var data = await res.json();
     if(!data || !Array.isArray(data.results) || !data.results.length) throw new Error('No live rows returned');
 
-    var incoming = data.results.map(map);
+    var mapper = (typeof map === 'function') ? map : function(r){ return r; };
+    var incoming = data.results.map(mapper);
     if(append) allRows = allRows.concat(incoming); else allRows = incoming;
     totalRows = data.total || data.matched || allRows.length;
     nextOffset = (data.nextOffset !== undefined && data.nextOffset !== null) ? data.nextOffset : (data.hasMore ? pageOffset + LIMIT : null);
