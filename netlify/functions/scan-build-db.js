@@ -60,12 +60,7 @@ async function sbFetch(path, opts = {}) {
   const { url, key } = sbConfig();
   const res = await fetch(`${url}/rest/v1/${path}`, {
     ...opts,
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      ...(opts.headers || {})
-    }
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...(opts.headers || {}) }
   });
   const text = await res.text().catch(() => "");
   if (!res.ok) throw new Error(`${opts.method || "GET"} ${path} failed ${res.status}: ${text}`);
@@ -207,33 +202,32 @@ function scanAll(ch, sym, name, sector, market, now, earningsMap = {}, todayStr 
         const longPutOI = lp.open_interest || 0, longCallOI = lc.open_interest || 0;
         const em = expectedMoveFields(spot, iv, sc.dte, sp.strike, sc.strike);
         const score = qualityScore({ roc, probOtm, iv, monthlyOI, shortPutOI, shortCallOI, spreadMax, earnInWindow, expectedMoveStatus: em.expectedMoveStatus, credit, width });
-        out.push({
-          symbol: sym, name, sector, market: market || "both", spot: round2(spot), iv: +iv.toFixed(1), hv: +iv.toFixed(1), dte: sc.dte, expiry: ek,
-          earnings: earnInWindow, earnings_date: earnInWindow ? erDate : null, next_earnings: erDate,
-          short_put: sp.strike, long_put: lp.strike, short_call: sc.strike, long_call: lc.strike,
-          credit, mid_credit: midCredit, width, max_risk: maxRisk, roc, prob_otm: probOtm, put_prob_otm: putProbOtm, call_prob_otm: callProbOtm,
-          short_delta: +Math.max(putDelta, callDelta).toFixed(3), open_interest: monthlyOI, short_put_oi: shortPutOI, short_call_oi: shortCallOI, long_put_oi: longPutOI, long_call_oi: longCallOI,
-          spread_max: spreadMax, expected_move: em.expectedMove, expected_low: em.expectedLow, expected_high: em.expectedHigh, expected_move_status: em.expectedMoveStatus,
-          passed: true, score, review_status: "Raw monthly-chain candidate — apply Band Intake filters", note: "Raw candidate. User Band Intake values determine display eligibility.", raw_chain_eligible: true, raw_chain_rule: "monthly third-Friday expiration, 15-45 DTE only", source_payload: { symbol: sym, option_put_short: sp.option, option_put_long: lp.option, option_call_short: sc.option, option_call_long: lc.option }
-        });
+        out.push({ symbol: sym, name, sector, market: market || "both", spot: round2(spot), iv: +iv.toFixed(1), hv: +iv.toFixed(1), dte: sc.dte, expiry: ek, earnings: earnInWindow, earnings_date: earnInWindow ? erDate : null, next_earnings: erDate, short_put: sp.strike, long_put: lp.strike, short_call: sc.strike, long_call: lc.strike, credit, mid_credit: midCredit, width, max_risk: maxRisk, roc, prob_otm: probOtm, put_prob_otm: putProbOtm, call_prob_otm: callProbOtm, short_delta: +Math.max(putDelta, callDelta).toFixed(3), open_interest: monthlyOI, short_put_oi: shortPutOI, short_call_oi: shortCallOI, long_put_oi: longPutOI, long_call_oi: longCallOI, spread_max: spreadMax, expected_move: em.expectedMove, expected_low: em.expectedLow, expected_high: em.expectedHigh, expected_move_status: em.expectedMoveStatus, passed: true, score, review_status: "Raw monthly-chain candidate — apply Band Intake filters", note: "Raw candidate. User Band Intake values determine display eligibility.", raw_chain_eligible: true, raw_chain_rule: "monthly third-Friday expiration, 15-45 DTE only", source_payload: { symbol: sym, option_put_short: sp.option, option_put_long: lp.option, option_call_short: sc.option, option_call_long: lc.option } });
       }
     }
   }
   return out;
 }
 
+function candidateKey(r) {
+  return [r.scan_run_id, r.symbol, r.expiry, r.short_put, r.long_put, r.short_call, r.long_call, r.width].join("|");
+}
+
 async function insertRows(scanRunId, rows) {
-  if (!rows.length) return;
-  const mapped = rows.map(r => ({ ...r, scan_run_id: scanRunId }));
+  if (!rows.length) return 0;
+  const seen = new Map();
+  for (const r of rows) {
+    const mapped = { ...r, scan_run_id: scanRunId };
+    seen.set(candidateKey(mapped), mapped);
+  }
+  const mapped = Array.from(seen.values());
   for (let i = 0; i < mapped.length; i += 500) {
     await sbFetch("scan_candidates?on_conflict=scan_run_id,symbol,expiry,short_put,long_put,short_call,long_call,width", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(mapped.slice(i, i + 500)) });
   }
+  return mapped.length;
 }
 
-async function candidateCount(scanRunId) {
-  return sbCount("scan_candidates", `scan_run_id=eq.${encodeURIComponent(scanRunId)}`);
-}
-
+async function candidateCount(scanRunId) { return sbCount("scan_candidates", `scan_run_id=eq.${encodeURIComponent(scanRunId)}`); }
 async function createRun() {
   const universe = await loadUniverse();
   const earnings = await loadEarnings(90);
@@ -241,40 +235,21 @@ async function createRun() {
   const { data } = await sbFetch("scan_runs?select=*", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(body) });
   return data[0];
 }
-
-async function latestActiveRun() {
-  const { data } = await sbFetch("scan_runs?select=*&status=in.(running,stale)&order=started_at.desc&limit=1");
-  return Array.isArray(data) ? data[0] : null;
-}
-
-async function loadRun(restart) {
-  if (restart) return createRun();
-  const active = await latestActiveRun();
-  return active || createRun();
-}
-
-async function updateRun(id, updates) {
-  await sbFetch(`scan_runs?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(updates) });
-}
-
-function baseUrl(req) {
-  try { const u = new URL(req.url); return process.env.URL || process.env.DEPLOY_URL || `${u.protocol}//${u.host}`; }
-  catch (_) { return process.env.URL || process.env.DEPLOY_URL || ""; }
-}
+async function latestActiveRun() { const { data } = await sbFetch("scan_runs?select=*&status=in.(running,stale)&order=started_at.desc&limit=1"); return Array.isArray(data) ? data[0] : null; }
+async function loadRun(restart) { if (restart) return createRun(); const active = await latestActiveRun(); return active || createRun(); }
+async function updateRun(id, updates) { await sbFetch(`scan_runs?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(updates) }); }
+function baseUrl(req) { try { const u = new URL(req.url); return process.env.URL || process.env.DEPLOY_URL || `${u.protocol}//${u.host}`; } catch (_) { return process.env.URL || process.env.DEPLOY_URL || ""; } }
 
 export default async (req) => {
   const t0 = Date.now();
   const url = new URL(req.url);
   const restart = url.searchParams.get("restart") === "1" || url.searchParams.get("action") === "restart";
   let run;
-  try { run = await loadRun(restart); }
-  catch (err) { return json({ ok: false, error: String(err?.message || err) }, 500); }
-
+  try { run = await loadRun(restart); } catch (err) { return json({ ok: false, error: String(err?.message || err) }, 500); }
   let universe = Array.isArray(run.metadata?.universe) ? run.metadata.universe : null;
   let earnings = run.metadata?.earnings || null;
   if (!universe) universe = await loadUniverse();
   if (!earnings) earnings = await loadEarnings(90);
-
   const d = new Date();
   const now = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   const todayStr = new Date(now).toISOString().slice(0, 10);
@@ -282,7 +257,7 @@ export default async (req) => {
   let scanned = Math.max(0, Number(run.scanned_count || 0));
   const total = universe.length;
   let lastBatchRows = 0;
-
+  let lastInsertedRows = 0;
   try {
     while (pending < total && (Date.now() - t0) < MAX_RUN_MS) {
       const batch = universe.slice(pending, pending + CHUNK);
@@ -297,22 +272,21 @@ export default async (req) => {
           await sleep(120 + Math.random() * 260);
         }
       }));
-      if (allRows.length) await insertRows(run.id, allRows);
+      lastInsertedRows = allRows.length ? await insertRows(run.id, allRows) : 0;
       lastBatchRows = allRows.length;
       pending += batch.length;
       const count = await candidateCount(run.id);
-      await updateRun(run.id, { status: pending >= total ? "completed" : "running", universe_count: total, scanned_count: scanned, pending_index: pending, candidate_count: count, pass_count: count, completed_at: pending >= total ? new Date().toISOString() : null, error: null, metadata: { ...(run.metadata || {}), universe, earnings, backendFiltersRemoved: true, upstreamFiltersOnly: ["Monthly option chain", "15-45 DTE"], lastSymbolBatchSize: batch.length } });
+      await updateRun(run.id, { status: pending >= total ? "completed" : "running", universe_count: total, scanned_count: scanned, pending_index: pending, candidate_count: count, pass_count: count, completed_at: pending >= total ? new Date().toISOString() : null, error: null, metadata: { ...(run.metadata || {}), universe, earnings, backendFiltersRemoved: true, upstreamFiltersOnly: ["Monthly option chain", "15-45 DTE"], lastSymbolBatchSize: batch.length, lastGeneratedRows: lastBatchRows, lastInsertedRows } });
     }
   } catch (err) {
     try { await updateRun(run.id, { status: "failed", error: String(err?.message || err) }); } catch (_) {}
     return json({ ok: false, scanRunId: run.id, error: String(err?.message || err) }, 500);
   }
-
   const complete = pending >= total;
   if (!complete) {
     const base = baseUrl(req);
     if (base) { try { fetch(`${base}/.netlify/functions/scan-build-db?continue=1`, { method: "POST" }); } catch (_) {} }
   }
   const count = await candidateCount(run.id);
-  return json({ ok: true, scanRunId: run.id, status: complete ? "completed" : "running", scanned, total, pendingIndex: pending, candidateCount: count || 0, lastBatchRows, backendFiltersRemoved: true, upstreamFiltersOnly: ["Monthly option chain", "15-45 DTE"], framework: "v3 raw monthly-chain first · Supabase REST persistence" });
+  return json({ ok: true, scanRunId: run.id, status: complete ? "completed" : "running", scanned, total, pendingIndex: pending, candidateCount: count || 0, lastBatchRows, lastInsertedRows, backendFiltersRemoved: true, upstreamFiltersOnly: ["Monthly option chain", "15-45 DTE"], framework: "v3 raw monthly-chain first · Supabase REST persistence" });
 };
