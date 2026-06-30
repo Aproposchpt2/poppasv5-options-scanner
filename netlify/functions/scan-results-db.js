@@ -1,11 +1,10 @@
-// POPPA'S Option Scanner v3 — Supabase results endpoint.
-// Applies user Band Intake values server-side, then paginates.
-
-import { createClient } from "@supabase/supabase-js";
+// POPPA'S Option Scanner v3 — Supabase REST results endpoint.
+// Applies user Band Intake values server-side, then returns one page of rows.
+// Page size UX standard: 50 records at a time. CTA: Scan Next 50.
 
 const DEFAULT_STRATEGY = "SP500_Tight_Condor_Scan_v3_RawMonthlyFirst";
-const DEFAULT_SCAN_MODE = "Live · Monthly 15-45 DTE raw-chain-first · CBOE EOD (delayed) · Supabase persistence";
-const DEFAULT_DATA_SOURCE = "CBOE free delayed/EOD quotes; Band Intake values are applied in the Supabase read endpoint";
+const DEFAULT_SCAN_MODE = "CBOE EOD · Monthly option chain only · 15-45 DTE · Supabase persistence";
+const DEFAULT_DATA_SOURCE = "CBOE EOD/delayed quotes; Band Intake values are applied in the Supabase REST read endpoint";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
@@ -14,166 +13,169 @@ function json(body, status = 200) {
   });
 }
 
-function supabase() {
+function sbConfig() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false } });
+  return { url: url.replace(/\/$/, ""), key };
 }
 
-const num = (v, d) => {
-  if (v === null || v === undefined || v === "") return d;
-  const n = +v;
-  return Number.isFinite(n) ? n : d;
-};
-const clean = v => String(v || "").trim();
+async function sbFetch(path, opts = {}) {
+  const { url, key } = sbConfig();
+  const res = await fetch(`${url}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...(opts.headers || {})
+    }
+  });
+  const text = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`${opts.method || "GET"} ${path} failed ${res.status}: ${text}`);
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json") && text) return { data: JSON.parse(text), headers: res.headers };
+  return { data: text, headers: res.headers };
+}
 
-function getFilters(q) {
+function n(v, fallback) {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : fallback;
+}
+
+function pct(v) {
+  const x = Number(v);
+  if (!Number.isFinite(x)) return null;
+  return x > 1 ? x / 100 : x;
+}
+
+function enc(v) { return encodeURIComponent(String(v)); }
+
+async function latestRun() {
+  const { data } = await sbFetch("scan_runs?select=*&order=started_at.desc&limit=1");
+  return Array.isArray(data) ? data[0] : null;
+}
+
+function readFilters(url) {
+  const q = url.searchParams;
+  const rawLimit = n(q.get("limit"), 50);
+  const limit = Math.max(1, Math.min(50, Math.floor(rawLimit || 50)));
   return {
-    rocMin: num(q.get("rocMin"), 5),
-    rocMax: num(q.get("rocMax"), 10),
-    minProb: num(q.get("minProb"), 90),
-    ivMin: num(q.get("ivMin"), 30),
-    minOI: num(q.get("minOI"), 10000),
-    minShortOI: num(q.get("minShortOI"), 1),
-    maxSpread: num(q.get("maxSpread"), 0.25),
-    dteMin: num(q.get("dteMin"), 15),
-    dteMax: num(q.get("dteMax"), 45),
-    excludeEarnings: (q.get("excludeEarnings") || "yes") !== "no",
-    idx: clean(q.get("idx") || "both").toLowerCase(),
-    width: num(q.get("width"), 5),
-    emStatus: clean(q.get("emStatus") || q.get("expectedMoveStatus") || "Outside Expected Move"),
-    ivStatus: clean(q.get("ivStatus") || "All"),
-    rankBy: clean(q.get("rankBy") || "edge").toLowerCase()
+    limit,
+    offset: Math.max(0, Math.floor(n(q.get("offset"), 0))),
+    rocMin: n(q.get("rocMin"), 5),
+    rocMax: n(q.get("rocMax"), 10),
+    minProb: pct(q.get("minProb") ?? 90) ?? 0.90,
+    ivMin: n(q.get("ivMin"), 30),
+    minOI: n(q.get("minOI"), 10000),
+    minShortOI: n(q.get("minShortOI"), 1),
+    maxSpread: n(q.get("maxSpread"), 0.25),
+    dteMin: n(q.get("dteMin"), 15),
+    dteMax: n(q.get("dteMax"), 45),
+    excludeEarnings: String(q.get("excludeEarnings") || "yes").toLowerCase(),
+    idx: String(q.get("idx") || "both").toLowerCase(),
+    width: n(q.get("width"), 5),
+    emStatus: String(q.get("emStatus") || "Outside Expected Move"),
+    ivStatus: String(q.get("ivStatus") || "All"),
+    rankBy: String(q.get("rankBy") || "edge").toLowerCase()
   };
 }
 
-function probFloor(v) {
-  const n = num(v, 90);
-  return n > 1 ? n / 100 : n;
+function orderFor(rankBy) {
+  if (rankBy === "roc") return "roc.desc";
+  if (rankBy === "prob") return "prob_otm.desc";
+  if (rankBy === "iv") return "iv.desc";
+  if (rankBy === "credit") return "credit.desc";
+  return "score.desc,roc.desc,prob_otm.desc";
 }
 
-async function latestRun(sb) {
-  const { data: active, error: activeError } = await sb.from("scan_runs")
-    .select("*")
-    .in("status", ["running", "stale"])
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (activeError) throw activeError;
-  if (active) return active;
+function addBandFilters(params, f) {
+  params.push(`roc=gte.${enc(f.rocMin)}`);
+  params.push(`roc=lte.${enc(f.rocMax)}`);
+  params.push(`prob_otm=gte.${enc(f.minProb)}`);
+  params.push(`iv=gte.${enc(f.ivMin)}`);
+  params.push(`open_interest=gte.${enc(f.minOI)}`);
+  params.push(`short_put_oi=gte.${enc(f.minShortOI)}`);
+  params.push(`short_call_oi=gte.${enc(f.minShortOI)}`);
+  params.push(`spread_max=lte.${enc(f.maxSpread)}`);
+  params.push(`dte=gte.${enc(f.dteMin)}`);
+  params.push(`dte=lte.${enc(f.dteMax)}`);
 
-  const { data, error } = await sb.from("scan_runs")
-    .select("*")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-}
-
-function applyFilters(query, f) {
-  let q = query
-    .gte("roc", f.rocMin)
-    .lte("roc", f.rocMax)
-    .gte("prob_otm", probFloor(f.minProb))
-    .gte("iv", f.ivMin)
-    .gte("open_interest", f.minOI)
-    .gte("short_put_oi", f.minShortOI)
-    .gte("short_call_oi", f.minShortOI)
-    .gte("dte", f.dteMin)
-    .lte("dte", f.dteMax);
-
-  if (Number.isFinite(+f.maxSpread)) q = q.lte("spread_max", f.maxSpread);
-  if (f.excludeEarnings) q = q.eq("earnings", false);
-  if (["sp", "ndx"].includes(f.idx)) q = q.or(`market.eq.both,market.eq.${f.idx}`);
-  if (f.width && Number(f.width) > 0) {
-    const w = Number(f.width);
-    q = q.gte("width", +(w - 0.01).toFixed(2)).lte("width", +(w + 0.01).toFixed(2));
-  }
-
-  const em = f.emStatus.toLowerCase();
-  if (em && !["all", "both", "any"].includes(em)) {
-    if (em.includes("outside")) q = q.in("expected_move_status", ["Outside EM", "Outside Expected Move"]);
-    else if (em.includes("near")) q = q.in("expected_move_status", ["Near EM", "Near Expected Move"]);
-    else if (em.includes("inside")) q = q.in("expected_move_status", ["Inside EM", "Inside Expected Move"]);
-    else if (em.includes("verify")) q = q.eq("expected_move_status", "Verify");
+  if (f.excludeEarnings === "yes" || f.excludeEarnings === "true") params.push("earnings=eq.false");
+  if (f.idx && f.idx !== "both" && f.idx !== "all") params.push(`market=in.(${enc(f.idx)},both)`);
+  if (Number.isFinite(f.width) && f.width > 0) {
+    params.push(`width=gte.${enc((f.width - 0.01).toFixed(2))}`);
+    params.push(`width=lte.${enc((f.width + 0.01).toFixed(2))}`);
   }
 
   const ivs = f.ivStatus.toLowerCase();
-  if (ivs && !["all", "both", "any"].includes(ivs)) {
-    if (ivs.includes("inflated")) q = q.gte("iv", 40);
-    else if (ivs.includes("deflated")) q = q.lt("iv", 30);
-    else if (ivs.includes("fair")) q = q.gte("iv", 30).lt("iv", 40);
+  if (ivs === "inflated") params.push("iv=gte.40");
+  else if (ivs === "deflated") params.push("iv=lt.30");
+  else if (ivs === "fair") {
+    params.push("iv=gte.30");
+    params.push("iv=lt.40");
   }
 
-  return q;
+  const em = f.emStatus.toLowerCase();
+  if (em && em !== "all") {
+    if (em.includes("outside")) params.push("or=(expected_move_status.eq.Outside%20EM,expected_move_status.eq.Outside%20Expected%20Move)");
+    else if (em.includes("inside")) params.push("expected_move_status=eq.Inside%20EM");
+    else if (em.includes("near")) params.push("expected_move_status=eq.Near%20EM");
+  }
 }
 
-function applyOrdering(q, rankBy) {
-  if (rankBy.includes("roc")) return q.order("roc", { ascending: false, nullsFirst: false }).order("score", { ascending: false, nullsFirst: false });
-  if (rankBy.includes("prob")) return q.order("prob_otm", { ascending: false, nullsFirst: false }).order("score", { ascending: false, nullsFirst: false });
-  if (rankBy.includes("iv")) return q.order("iv", { ascending: false, nullsFirst: false }).order("score", { ascending: false, nullsFirst: false });
-  if (rankBy.includes("credit")) return q.order("credit", { ascending: false, nullsFirst: false }).order("score", { ascending: false, nullsFirst: false });
-  return q.order("score", { ascending: false, nullsFirst: false }).order("roc", { ascending: false, nullsFirst: false }).order("credit", { ascending: false, nullsFirst: false });
+function contentRangeCount(headers, fallback = 0) {
+  const cr = headers.get("content-range") || "";
+  const m = cr.match(/\/(\d+)$/);
+  return m ? Number(m[1]) : fallback;
 }
 
-function ivStatusFor(iv) {
-  const n = Number(iv || 0);
-  if (!Number.isFinite(n) || n <= 0) return "Fair";
-  if (n >= 40) return "Inflated";
-  if (n < 30) return "Deflated";
-  return "Fair";
-}
-
-function rowOut(r) {
-  const prob = Number(r.prob_otm || 0) * 100;
+function mapRow(r) {
   return {
     id: r.id,
+    scanRunId: r.scan_run_id,
     symbol: r.symbol,
     name: r.name,
     sector: r.sector,
     market: r.market,
-    spot: r.spot == null ? null : Number(r.spot),
-    iv: r.iv == null ? null : Number(r.iv),
-    hv: r.hv == null ? null : Number(r.hv),
-    monthlyChainIV: r.iv == null ? null : Number(r.iv),
-    ivStatus: ivStatusFor(r.iv),
+    spot: r.spot,
+    iv: r.iv,
+    hv: r.hv,
     dte: r.dte,
     expiry: r.expiry,
-    earnings: !!r.earnings,
+    earnings: r.earnings,
     earningsDate: r.earnings_date,
     nextEarnings: r.next_earnings,
-    shortPut: r.short_put == null ? null : Number(r.short_put),
-    longPut: r.long_put == null ? null : Number(r.long_put),
-    shortCall: r.short_call == null ? null : Number(r.short_call),
-    longCall: r.long_call == null ? null : Number(r.long_call),
-    credit: r.credit == null ? null : Number(r.credit),
-    midCredit: r.mid_credit == null ? null : Number(r.mid_credit),
-    width: r.width == null ? null : Number(r.width),
-    risk: r.max_risk == null ? null : Number(r.max_risk),
-    maxRisk: r.max_risk == null ? null : Number(r.max_risk),
-    roc: r.roc == null ? null : Number(r.roc),
-    prob: Number.isFinite(prob) ? Math.round(prob) : null,
-    probOtm: r.prob_otm == null ? null : Number(r.prob_otm),
-    putProbOtm: r.put_prob_otm == null ? null : Number(r.put_prob_otm),
-    callProbOtm: r.call_prob_otm == null ? null : Number(r.call_prob_otm),
-    shortDelta: r.short_delta == null ? null : Number(r.short_delta),
-    openInterest: r.open_interest || 0,
-    shortPutOI: r.short_put_oi || 0,
-    shortCallOI: r.short_call_oi || 0,
-    longPutOI: r.long_put_oi || 0,
-    longCallOI: r.long_call_oi || 0,
-    spreadMax: r.spread_max == null ? null : Number(r.spread_max),
-    expectedMove: r.expected_move == null ? null : Number(r.expected_move),
-    expectedLow: r.expected_low == null ? null : Number(r.expected_low),
-    expectedHigh: r.expected_high == null ? null : Number(r.expected_high),
-    expectedMoveStatus: r.expected_move_status || "Verify",
-    passed: true,
-    score: r.score || 0,
-    reviewStatus: "Matches current Band Intake values ✓",
-    note: r.note || "Band-matched candidate. Verify live chain data before use.",
-    rawChainEligible: !!r.raw_chain_eligible,
+    shortPut: r.short_put,
+    longPut: r.long_put,
+    shortCall: r.short_call,
+    longCall: r.long_call,
+    credit: r.credit,
+    midCredit: r.mid_credit,
+    width: r.width,
+    maxRisk: r.max_risk,
+    roc: r.roc,
+    prob: Number.isFinite(Number(r.prob_otm)) ? Math.round(Number(r.prob_otm) * 100) : null,
+    probOtm: r.prob_otm,
+    putProbOtm: r.put_prob_otm,
+    callProbOtm: r.call_prob_otm,
+    shortDelta: r.short_delta,
+    openInterest: r.open_interest,
+    monthlyOI: r.open_interest,
+    shortPutOI: r.short_put_oi,
+    shortCallOI: r.short_call_oi,
+    longPutOI: r.long_put_oi,
+    longCallOI: r.long_call_oi,
+    spreadMax: r.spread_max,
+    expectedMove: r.expected_move,
+    expectedLow: r.expected_low,
+    expectedHigh: r.expected_high,
+    expectedMoveStatus: r.expected_move_status,
+    score: r.score,
+    passed: r.passed,
+    reviewStatus: r.review_status,
+    note: r.note,
+    rawChainEligible: r.raw_chain_eligible,
     rawChainRule: r.raw_chain_rule
   };
 }
@@ -181,12 +183,8 @@ function rowOut(r) {
 export default async (req) => {
   try {
     const url = new URL(req.url);
-    const q = url.searchParams;
-    const limit = Math.min(Math.max(parseInt(q.get("limit") || "50", 10) || 50, 1), 250);
-    const offset = Math.max(parseInt(q.get("offset") || "0", 10) || 0, 0);
-    const filters = getFilters(q);
-    const sb = supabase();
-    const run = await latestRun(sb);
+    const f = readFilters(url);
+    const run = await latestRun();
 
     if (!run) {
       return json({
@@ -195,46 +193,55 @@ export default async (req) => {
         strategy: DEFAULT_STRATEGY,
         scanMode: DEFAULT_SCAN_MODE,
         dataSource: DEFAULT_DATA_SOURCE,
-        generatedAt: null,
-        scanRunId: null,
+        generatedAt: new Date().toISOString(),
         status: "empty",
         building: false,
-        progress: { scanned: 0, total: 0 },
         universeCount: 0,
         scanned: 0,
         total: 0,
+        withCondor: 0,
+        passCount: 0,
         matched: 0,
         returned: 0,
-        offset,
-        limit,
+        offset: f.offset,
+        limit: f.limit,
+        hasRows: false,
         hasMore: false,
         nextOffset: null,
         filterMode: "supabase-band-aware-page",
-        processingMode: "supabase-filter-page",
+        processingMode: "supabase-rest-filter-page",
         serverFiltersApplied: true,
-        filters,
-        results: [],
-        userMessage: "No Supabase scan run exists yet. Start a scan."
+        backendFiltersRemoved: true,
+        pageCta: "Scan Next 50",
+        results: []
       });
     }
 
-    let query = sb.from("scan_candidates").select("*", { count: "exact" }).eq("scan_run_id", run.id);
-    query = applyFilters(query, filters);
-    query = applyOrdering(query, filters.rankBy).range(offset, offset + limit - 1);
-    const { data, error, count } = await query;
-    if (error) throw error;
+    const params = [`select=*`, `scan_run_id=eq.${enc(run.id)}`];
+    addBandFilters(params, f);
+    params.push(`order=${orderFor(f.rankBy)}`);
+    const path = `scan_candidates?${params.join("&")}`;
+    const rangeEnd = f.offset + f.limit - 1;
+    const { data, headers } = await sbFetch(path, {
+      method: "GET",
+      headers: {
+        Prefer: "count=exact",
+        Range: `${f.offset}-${rangeEnd}`,
+        "Range-Unit": "items"
+      }
+    });
 
-    const matched = count || 0;
-    const rows = (data || []).map(rowOut);
-    const hasMore = offset + limit < matched;
-    const building = ["running", "stale"].includes(run.status);
+    const rows = Array.isArray(data) ? data.map(mapRow) : [];
+    const matched = contentRangeCount(headers, rows.length);
+    const nextOffset = f.offset + rows.length < matched ? f.offset + rows.length : null;
+    const building = ["running", "stale"].includes(String(run.status || "").toLowerCase());
 
     return json({
       ok: true,
       strategy: run.strategy || DEFAULT_STRATEGY,
       scanMode: run.scan_mode || DEFAULT_SCAN_MODE,
       dataSource: run.data_source || DEFAULT_DATA_SOURCE,
-      generatedAt: run.updated_at || run.started_at,
+      generatedAt: run.updated_at || run.started_at || new Date().toISOString(),
       scanRunId: run.id,
       status: run.status,
       building,
@@ -246,20 +253,18 @@ export default async (req) => {
       passCount: matched,
       matched,
       returned: rows.length,
-      offset,
-      limit,
+      offset: f.offset,
+      limit: f.limit,
       hasRows: rows.length > 0,
-      hasMore,
-      nextOffset: hasMore ? offset + limit : null,
+      hasMore: nextOffset !== null,
+      nextOffset,
       filterMode: "supabase-band-aware-page",
-      processingMode: "supabase-filter-page",
+      processingMode: "supabase-rest-filter-page",
       serverFiltersApplied: true,
       backendFiltersRemoved: true,
-      filters,
-      results: rows,
-      userMessage: building
-        ? "Supabase scan is still building. Displaying rows that match current Band Intake values."
-        : "Supabase scan is ready. Displaying rows that match current Band Intake values."
+      pageCta: "Scan Next 50",
+      filters: f,
+      results: rows
     });
   } catch (err) {
     return json({ ok: false, error: String(err?.message || err) }, 500);
