@@ -1,15 +1,17 @@
 // POPPA'S Option Scanner v3 — Supabase REST scan builder.
 // Backend rule: generate broad raw monthly Iron Condor candidates only.
-// Upstream ingestion filters only: monthly option chain + 15-45 DTE.
+// Upstream ingestion filters only: monthly option chain + 15-45 DTE + duplicate structural record removal.
 // User Band Intake values are applied in scan-results-db.js, not here.
 
-const CHUNK = 24;
-const CONCURRENCY = 3;
-const MAX_RUN_MS = 8 * 60 * 1000;
+const CHUNK = 8;
+const CONCURRENCY = 2;
+const MAX_RUN_MS = 20 * 1000;
+const CONTINUE_TIMEOUT_MS = 2500;
 const SP500_CSV = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv";
 const STRATEGY = "SP500_Tight_Condor_Scan_v3_RawMonthlyFirst";
 const SCAN_MODE = "CBOE EOD · Monthly option chain only · 15-45 DTE · Supabase persistence";
 const DATA_SOURCE = "CBOE EOD/delayed quotes; ingestion extracts monthly option-chain records with 15-45 DTE only. All other filters are user Band Intake controls.";
+const UPSTREAM_FILTERS_ONLY = ["Monthly option chain", "15-45 DTE", "Duplicate structural record removal"];
 
 const CURATED = [
   ["NVDA","NVIDIA","Technology","both"],["TSLA","Tesla","Consumer Disc.","both"],["AMD","Advanced Micro Devices","Technology","both"],
@@ -127,23 +129,23 @@ async function loadEarnings(days = 90) {
   async function worker() {
     while (queue.length) {
       const d = queue.shift();
-      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 10000);
+      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
       try {
         const r = await fetch("https://api.nasdaq.com/api/calendar/earnings?date=" + d, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain, */*" }, signal: ctrl.signal });
         if (r.ok) { const j = await r.json(); for (const row of ((j.data && j.data.rows) || [])) { const s = (row.symbol || "").toUpperCase().trim(); if (s && (!map[s] || d < map[s])) map[s] = d; } }
       } catch (_) {} finally { clearTimeout(t); }
     }
   }
-  await Promise.all(Array.from({ length: 8 }, worker));
+  await Promise.all(Array.from({ length: 6 }, worker));
   return map;
 }
 
-async function fetchSym(sym, tries = 3) {
+async function fetchSym(sym, tries = 2) {
   for (let i = 0; i < tries; i++) {
-    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 15000);
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
     try { const r = await fetch(cboeUrl(sym), { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal }); if (r.ok) { const j = await r.json(); clearTimeout(t); return j.data || j; } }
     catch (_) {} finally { clearTimeout(t); }
-    await sleep(450 + Math.random() * 350);
+    await sleep(300 + Math.random() * 250);
   }
   return null;
 }
@@ -231,7 +233,7 @@ async function candidateCount(scanRunId) { return sbCount("scan_candidates", `sc
 async function createRun() {
   const universe = await loadUniverse();
   const earnings = await loadEarnings(90);
-  const body = [{ strategy: STRATEGY, status: "running", scan_mode: SCAN_MODE, data_source: DATA_SOURCE, universe_count: universe.length, scanned_count: 0, candidate_count: 0, pass_count: 0, pending_index: 0, metadata: { universe, earnings, createdBy: "scan-build-db-rest", backendFiltersRemoved: true, upstreamFiltersOnly: ["Monthly option chain", "15-45 DTE"] } }];
+  const body = [{ strategy: STRATEGY, status: "running", scan_mode: SCAN_MODE, data_source: DATA_SOURCE, universe_count: universe.length, scanned_count: 0, candidate_count: 0, pass_count: 0, pending_index: 0, metadata: { universe, earnings, createdBy: "scan-build-db-rest", backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, autoFillMode: "short-batch-self-continuation" } }];
   const { data } = await sbFetch("scan_runs?select=*", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(body) });
   return data[0];
 }
@@ -239,6 +241,22 @@ async function latestActiveRun() { const { data } = await sbFetch("scan_runs?sel
 async function loadRun(restart) { if (restart) return createRun(); const active = await latestActiveRun(); return active || createRun(); }
 async function updateRun(id, updates) { await sbFetch(`scan_runs?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(updates) }); }
 function baseUrl(req) { try { const u = new URL(req.url); return process.env.URL || process.env.DEPLOY_URL || `${u.protocol}//${u.host}`; } catch (_) { return process.env.URL || process.env.DEPLOY_URL || ""; } }
+
+async function triggerContinuation(req, scanRunId) {
+  const base = baseUrl(req);
+  if (!base) return { queued: false, reason: "no-base-url" };
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CONTINUE_TIMEOUT_MS);
+  const endpoint = `${base}/.netlify/functions/scan-build-db?continue=1&scanRunId=${encodeURIComponent(scanRunId)}`;
+  try {
+    fetch(endpoint, { method: "POST", headers: { accept: "application/json" }, signal: ctrl.signal }).catch(() => {});
+    return { queued: true, endpoint };
+  } catch (err) {
+    return { queued: false, error: String(err?.message || err), endpoint };
+  } finally {
+    setTimeout(() => clearTimeout(t), CONTINUE_TIMEOUT_MS + 100);
+  }
+}
 
 export default async (req) => {
   const t0 = Date.now();
@@ -258,35 +276,34 @@ export default async (req) => {
   const total = universe.length;
   let lastBatchRows = 0;
   let lastInsertedRows = 0;
+  let batchesProcessed = 0;
   try {
     while (pending < total && (Date.now() - t0) < MAX_RUN_MS) {
       const batch = universe.slice(pending, pending + CHUNK);
       const queue = [...batch];
       const allRows = [];
-      await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length || 1) }, async () => {
         while (queue.length) {
           const [sym, name, sector, market] = queue.shift();
           const ch = await fetchSym(sym);
           scanned++;
           if (ch) allRows.push(...scanAll(ch, sym, name, sector, market, now, earnings, todayStr));
-          await sleep(120 + Math.random() * 260);
+          await sleep(80 + Math.random() * 180);
         }
       }));
       lastInsertedRows = allRows.length ? await insertRows(run.id, allRows) : 0;
       lastBatchRows = allRows.length;
       pending += batch.length;
+      batchesProcessed++;
       const count = await candidateCount(run.id);
-      await updateRun(run.id, { status: pending >= total ? "completed" : "running", universe_count: total, scanned_count: scanned, pending_index: pending, candidate_count: count, pass_count: count, completed_at: pending >= total ? new Date().toISOString() : null, error: null, metadata: { ...(run.metadata || {}), universe, earnings, backendFiltersRemoved: true, upstreamFiltersOnly: ["Monthly option chain", "15-45 DTE"], lastSymbolBatchSize: batch.length, lastGeneratedRows: lastBatchRows, lastInsertedRows } });
+      await updateRun(run.id, { status: pending >= total ? "completed" : "running", universe_count: total, scanned_count: scanned, pending_index: pending, candidate_count: count, pass_count: count, completed_at: pending >= total ? new Date().toISOString() : null, error: null, metadata: { ...(run.metadata || {}), universe, earnings, backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, autoFillMode: "short-batch-self-continuation", batchSize: CHUNK, concurrency: CONCURRENCY, maxRunMs: MAX_RUN_MS, batchesProcessed, lastSymbolBatchSize: batch.length, lastGeneratedRows: lastBatchRows, lastInsertedRows, lastContinuationAt: new Date().toISOString() } });
     }
   } catch (err) {
     try { await updateRun(run.id, { status: "failed", error: String(err?.message || err) }); } catch (_) {}
     return json({ ok: false, scanRunId: run.id, error: String(err?.message || err) }, 500);
   }
   const complete = pending >= total;
-  if (!complete) {
-    const base = baseUrl(req);
-    if (base) { try { fetch(`${base}/.netlify/functions/scan-build-db?continue=1`, { method: "POST" }); } catch (_) {} }
-  }
+  const continuation = complete ? { queued: false, reason: "complete" } : await triggerContinuation(req, run.id);
   const count = await candidateCount(run.id);
-  return json({ ok: true, scanRunId: run.id, status: complete ? "completed" : "running", scanned, total, pendingIndex: pending, candidateCount: count || 0, lastBatchRows, lastInsertedRows, backendFiltersRemoved: true, upstreamFiltersOnly: ["Monthly option chain", "15-45 DTE"], framework: "v3 raw monthly-chain first · Supabase REST persistence" });
+  return json({ ok: true, scanRunId: run.id, status: complete ? "completed" : "running", scanned, total, pendingIndex: pending, candidateCount: count || 0, lastBatchRows, lastInsertedRows, batchesProcessed, continuation, backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, framework: "v3 raw monthly-chain first · Supabase REST persistence" });
 };
