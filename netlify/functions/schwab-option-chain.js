@@ -1,3 +1,5 @@
+import { getStore } from "@netlify/blobs";
+
 // POPPA'S Option Scanner v3 — Schwab option-chain market data test function
 // Purpose: pull Schwab/TOS option-chain market data for a test symbol using server-side OAuth.
 // Security posture: market-data only. This function never calls Schwab account, trading, position, balance,
@@ -7,6 +9,9 @@
 const DEFAULT_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token";
 const DEFAULT_API_BASE_URL = "https://api.schwabapi.com";
 const OPTION_CHAIN_PATH = "/marketdata/v1/chains";
+
+const TOKEN_STORE_NAME = process.env.SCHWAB_TOKEN_STORE_NAME || "schwab-oauth";
+const TOKEN_STORE_KEY = process.env.SCHWAB_TOKEN_STORE_KEY || "latest-token";
 
 const SECURITY_HEADERS = {
   "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
@@ -134,9 +139,70 @@ function basicAuthHeader() {
   return `Basic ${encoded}`;
 }
 
+async function readStoredTokenRecord() {
+  try {
+    const store = getStore(TOKEN_STORE_NAME);
+    const stored = await store.get(TOKEN_STORE_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeStoredTokenRecord(existingRecord = {}, tokenResponse = {}) {
+  const receivedAt = new Date();
+  const expiresIn = Number(tokenResponse.expires_in || 0);
+  const tokenRecord = {
+    ...existingRecord,
+    provider: "schwab",
+    marketDataOnly: true,
+    token_type: tokenResponse.token_type || existingRecord.token_type || "Bearer",
+    access_token: tokenResponse.access_token || existingRecord.access_token || null,
+    refresh_token: tokenResponse.refresh_token || existingRecord.refresh_token || null,
+    expires_in: tokenResponse.expires_in || existingRecord.expires_in || null,
+    scope: tokenResponse.scope || existingRecord.scope || null,
+    received_at: receivedAt.toISOString(),
+    access_token_expires_at: expiresIn > 0 ? new Date(receivedAt.getTime() + expiresIn * 1000).toISOString() : null,
+    tokenReturnedToFrontend: false,
+    accountDataReturnedToFrontend: false
+  };
+
+  const store = getStore(TOKEN_STORE_NAME);
+  await store.set(TOKEN_STORE_KEY, JSON.stringify(tokenRecord));
+  return tokenRecord;
+}
+
+async function resolveRefreshToken() {
+  const storedRecord = await readStoredTokenRecord();
+  if (storedRecord?.refresh_token) {
+    return { refreshToken: storedRecord.refresh_token, source: "netlify_blob_store", storedRecord };
+  }
+
+  const envToken = getEnv("SCHWAB_REFRESH_TOKEN");
+  if (envToken) {
+    return { refreshToken: envToken, source: "env", storedRecord: null };
+  }
+
+  return { refreshToken: "", source: "missing", storedRecord };
+}
+
 async function refreshAccessToken() {
-  requireEnv(["SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_TOKEN_URL", "SCHWAB_REFRESH_TOKEN"]);
+  requireEnv(["SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_TOKEN_URL"]);
   assertMarketDataOnlyConfig();
+
+  const resolved = await resolveRefreshToken();
+  if (!resolved.refreshToken) {
+    const error = new Error("Missing refresh token. Complete Schwab authorization or configure SCHWAB_REFRESH_TOKEN.");
+    error.status = 400;
+    error.safeDetails = {
+      tokenStoreName: TOKEN_STORE_NAME,
+      tokenStoreKey: TOKEN_STORE_KEY,
+      tokenStoreFound: Boolean(resolved.storedRecord),
+      envRefreshTokenConfigured: Boolean(getEnv("SCHWAB_REFRESH_TOKEN"))
+    };
+    throw error;
+  }
 
   const tokenUrl = getEnv("SCHWAB_TOKEN_URL", DEFAULT_TOKEN_URL);
   assertNoBlockedTerms(tokenUrl, "token URL");
@@ -150,7 +216,7 @@ async function refreshAccessToken() {
     },
     body: new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: getEnv("SCHWAB_REFRESH_TOKEN")
+      refresh_token: resolved.refreshToken
     })
   });
 
@@ -169,9 +235,17 @@ async function refreshAccessToken() {
       status: response.status,
       statusText: response.statusText,
       schwabError: parsed.error || null,
-      schwabErrorDescription: parsed.error_description || null
+      schwabErrorDescription: parsed.error_description || null,
+      tokenSource: resolved.source
     };
     throw error;
+  }
+
+  if (resolved.source === "netlify_blob_store" || parsed.refresh_token) {
+    await writeStoredTokenRecord(resolved.storedRecord || {}, {
+      ...parsed,
+      refresh_token: parsed.refresh_token || resolved.refreshToken
+    });
   }
 
   return {
@@ -180,6 +254,7 @@ async function refreshAccessToken() {
       token_type: parsed.token_type || null,
       expires_in: parsed.expires_in || null,
       scope: parsed.scope || null,
+      token_source: resolved.source,
       access_token_present: true,
       refresh_token_returned_by_refresh: Boolean(parsed.refresh_token)
     }
@@ -390,6 +465,10 @@ function statusPayload() {
     marketDataOnly: true,
     accountAccessEnabled: false,
     tradingAccessEnabled: false,
+    tokenStore: {
+      name: TOKEN_STORE_NAME,
+      key: TOKEN_STORE_KEY
+    },
     env: {
       SCHWAB_CLIENT_ID: Boolean(getEnv("SCHWAB_CLIENT_ID")),
       SCHWAB_CLIENT_SECRET: Boolean(getEnv("SCHWAB_CLIENT_SECRET")),
