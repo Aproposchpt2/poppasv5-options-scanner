@@ -1,22 +1,15 @@
+import { getStore } from "@netlify/blobs";
+
 // POPPA'S Option Scanner v3 — Schwab OAuth token helper
 // Purpose: generate a Schwab OAuth authorization URL, exchange authorization codes, and refresh tokens.
 // Security posture: market-data only. This function never calls Schwab account, trading, position, balance,
 // order, transaction, or ACCT_ACTIVITY endpoints.
-//
-// Recommended setup flow:
-// 1) GET  /.netlify/functions/schwab-token?action=authorize
-// 2) Open the returned authorizationUrl in a browser.
-// 3) Authorize Market Data only and uncheck all brokerage accounts if Schwab shows account selection.
-// 4) Schwab redirects to SCHWAB_REDIRECT_URI with ?code=...
-// 5) Copy the code value and POST it here with { "action": "exchange", "code": "..." }.
-// 6) The response returns redacted token metadata by default.
-// 7) To export a refresh token for one-time Netlify ENV setup, temporarily enable:
-//    SCHWAB_TOKEN_EXPORT_ENABLED=true and set SCHWAB_SETUP_SECRET to a strong temporary secret.
-//    Then POST { "action": "exchange", "code": "...", "setupSecret": "..." }.
-//    Immediately save the refresh token as SCHWAB_REFRESH_TOKEN in Netlify, then disable export.
 
 const DEFAULT_AUTHORIZE_URL = "https://api.schwabapi.com/v1/oauth/authorize";
 const DEFAULT_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token";
+
+const TOKEN_STORE_NAME = process.env.SCHWAB_TOKEN_STORE_NAME || "schwab-oauth";
+const TOKEN_STORE_KEY = process.env.SCHWAB_TOKEN_STORE_KEY || "latest-token";
 
 const SECURITY_HEADERS = {
   "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
@@ -117,6 +110,59 @@ function buildAuthorizeUrl() {
   return authorizeUrl.toString();
 }
 
+async function readStoredTokenRecord() {
+  try {
+    const store = getStore(TOKEN_STORE_NAME);
+    const stored = await store.get(TOKEN_STORE_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeStoredTokenRecord(existingRecord = {}, tokenResponse = {}) {
+  const receivedAt = new Date();
+  const expiresIn = Number(tokenResponse.expires_in || 0);
+  const tokenRecord = {
+    ...existingRecord,
+    provider: "schwab",
+    marketDataOnly: true,
+    token_type: tokenResponse.token_type || existingRecord.token_type || "Bearer",
+    access_token: tokenResponse.access_token || existingRecord.access_token || null,
+    refresh_token: tokenResponse.refresh_token || existingRecord.refresh_token || null,
+    expires_in: tokenResponse.expires_in || existingRecord.expires_in || null,
+    scope: tokenResponse.scope || existingRecord.scope || null,
+    received_at: receivedAt.toISOString(),
+    access_token_expires_at: expiresIn > 0 ? new Date(receivedAt.getTime() + expiresIn * 1000).toISOString() : null,
+    tokenReturnedToFrontend: false,
+    accountDataReturnedToFrontend: false
+  };
+
+  const store = getStore(TOKEN_STORE_NAME);
+  await store.set(TOKEN_STORE_KEY, JSON.stringify(tokenRecord));
+  return tokenRecord;
+}
+
+async function resolveRefreshToken(explicitRefreshToken = "") {
+  const explicit = String(explicitRefreshToken || "").trim();
+  if (explicit) {
+    return { refreshToken: explicit, source: "request_body", storedRecord: null };
+  }
+
+  const storedRecord = await readStoredTokenRecord();
+  if (storedRecord?.refresh_token) {
+    return { refreshToken: storedRecord.refresh_token, source: "netlify_blob_store", storedRecord };
+  }
+
+  const envToken = getEnv("SCHWAB_REFRESH_TOKEN");
+  if (envToken) {
+    return { refreshToken: envToken, source: "env", storedRecord: null };
+  }
+
+  return { refreshToken: "", source: "missing", storedRecord };
+}
+
 async function postTokenRequest(bodyParams) {
   requireEnv(["SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_TOKEN_URL"]);
   assertMarketDataOnlyConfig();
@@ -172,14 +218,23 @@ async function exchangeAuthorizationCode(code, setupSecret = "") {
     redirect_uri: getEnv("SCHWAB_REDIRECT_URI")
   });
 
-  return buildTokenResponsePayload(tokenResponse, setupSecret, "authorization_code");
+  await writeStoredTokenRecord({}, tokenResponse);
+  return buildTokenResponsePayload(tokenResponse, setupSecret, "authorization_code", "schwab_token_exchange");
 }
 
 async function refreshAccessToken(refreshToken = "") {
-  const token = refreshToken || getEnv("SCHWAB_REFRESH_TOKEN");
+  const resolved = await resolveRefreshToken(refreshToken);
+  const token = resolved.refreshToken;
+
   if (!token) {
-    const error = new Error("Missing refresh token. Add SCHWAB_REFRESH_TOKEN after the initial OAuth exchange.");
+    const error = new Error("Missing refresh token. Complete Schwab authorization or configure SCHWAB_REFRESH_TOKEN.");
     error.status = 400;
+    error.safeDetails = {
+      tokenStoreName: TOKEN_STORE_NAME,
+      tokenStoreKey: TOKEN_STORE_KEY,
+      tokenStoreFound: Boolean(resolved.storedRecord),
+      envRefreshTokenConfigured: Boolean(getEnv("SCHWAB_REFRESH_TOKEN"))
+    };
     throw error;
   }
 
@@ -188,7 +243,14 @@ async function refreshAccessToken(refreshToken = "") {
     refresh_token: token
   });
 
-  return buildTokenResponsePayload(tokenResponse, "", "refresh_token");
+  if (resolved.source === "netlify_blob_store" || tokenResponse.refresh_token) {
+    await writeStoredTokenRecord(resolved.storedRecord || {}, {
+      ...tokenResponse,
+      refresh_token: tokenResponse.refresh_token || token
+    });
+  }
+
+  return buildTokenResponsePayload(tokenResponse, "", "refresh_token", resolved.source);
 }
 
 function tokenExportAllowed(setupSecret = "") {
@@ -197,12 +259,13 @@ function tokenExportAllowed(setupSecret = "") {
   return Boolean(exportEnabled && expectedSecret && setupSecret && setupSecret === expectedSecret);
 }
 
-function buildTokenResponsePayload(tokenResponse, setupSecret = "", grantType = "") {
+function buildTokenResponsePayload(tokenResponse, setupSecret = "", grantType = "", tokenSource = "") {
   const exportTokens = tokenExportAllowed(setupSecret);
 
   const payload = {
     ok: true,
     grantType,
+    tokenSource,
     marketDataOnly: true,
     accountAccessEnabled: false,
     tradingAccessEnabled: false,
@@ -211,7 +274,7 @@ function buildTokenResponsePayload(tokenResponse, setupSecret = "", grantType = 
     metadata: tokenMetadata(tokenResponse),
     nextStep: exportTokens && tokenResponse.refresh_token
       ? "Save refresh_token into Netlify as SCHWAB_REFRESH_TOKEN, mark it secret, then disable SCHWAB_TOKEN_EXPORT_ENABLED."
-      : "Token values are redacted. To export a refresh token for one-time setup, temporarily set SCHWAB_TOKEN_EXPORT_ENABLED=true and SCHWAB_SETUP_SECRET, then repeat exchange with setupSecret.",
+      : "Token values are redacted. Refresh-token storage is server-side; token export is disabled unless setupSecret is provided during setup mode.",
     securityNote: MARKET_DATA_ONLY_NOTE
   };
 
@@ -269,6 +332,10 @@ function statusPayload() {
     marketDataOnly: true,
     accountAccessEnabled: false,
     tradingAccessEnabled: false,
+    tokenStore: {
+      name: TOKEN_STORE_NAME,
+      key: TOKEN_STORE_KEY
+    },
     env: {
       SCHWAB_CLIENT_ID: Boolean(getEnv("SCHWAB_CLIENT_ID")),
       SCHWAB_CLIENT_SECRET: Boolean(getEnv("SCHWAB_CLIENT_SECRET")),
@@ -322,7 +389,7 @@ export default async function handler(req) {
           "Open authorizationUrl in a browser.",
           "Authorize Market Data only.",
           "If Schwab shows brokerage accounts, uncheck every account before submitting.",
-          "After redirect, use the returned code with POST action=exchange."
+          "After redirect, schwab-callback auto-exchanges the authorization code server-side when enabled."
         ],
         securityNote: MARKET_DATA_ONLY_NOTE
       });
