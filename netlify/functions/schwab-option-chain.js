@@ -51,7 +51,8 @@ const DEFAULT_SAFE_PARAMS = {
   contractType: "ALL",
   includeQuotes: "TRUE",
   strategy: "SINGLE",
-  range: "ALL"
+  range: "NTM",
+  strikeCount: "20"
 };
 
 const FORWARDED_CHAIN_PARAMS = [
