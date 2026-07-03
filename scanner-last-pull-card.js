@@ -5,9 +5,11 @@ document.addEventListener('DOMContentLoaded', function () {
   card.className = 'metric';
   card.innerHTML = '<span>Last File Pull</span><strong id="lastFilePullValue">Loading...</strong>';
   metrics.appendChild(card);
-  window.setTimeout(function () {
+  function syncLastPull() {
     var source = document.getElementById('truthLastScan');
     var target = document.getElementById('lastFilePullValue');
     if (source && target) target.textContent = source.textContent || 'Unavailable';
-  }, 2000);
+  }
+  syncLastPull();
+  window.setInterval(syncLastPull, 2000);
 });
