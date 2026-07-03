@@ -1,5 +1,5 @@
 // POPPA'S Option Scanner v3 — Supabase scan-cycle cleanup.
-// Marks unfinished prior runs as superseded while preserving rows for timing and audit history.
+// Marks unfinished prior runs as failed while preserving rows for timing and audit history.
 // No Netlify Blob access and no Supabase schema changes.
 
 function json(body, status = 200) {
@@ -47,9 +47,10 @@ export default async (req) => {
         method: "PATCH",
         headers: { Prefer: "return=representation" },
         body: JSON.stringify({
-          status: "superseded",
+          status: "failed",
           updated_at: now,
-          error: `Superseded by fresh Supabase scan cycle: ${cycle}`
+          completed_at: now,
+          error: `Failed by fresh Supabase scan cycle cleanup: ${cycle}`
         })
       });
     }
@@ -57,7 +58,7 @@ export default async (req) => {
     return json({
       ok: true,
       cycle,
-      cleanupMode: "mark-incomplete-runs-superseded",
+      cleanupMode: "mark-incomplete-runs-failed",
       activeRunsFound: Array.isArray(active) ? active.length : 0,
       runsUpdated: Array.isArray(updated) ? updated.length : 0,
       candidateRowsDeleted: 0,
