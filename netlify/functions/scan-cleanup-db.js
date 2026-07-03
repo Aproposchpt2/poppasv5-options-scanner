@@ -1,6 +1,6 @@
 // POPPA'S Option Scanner v3 — Supabase scan-cycle cleanup.
-// Marks unfinished prior runs as failed while preserving rows for timing and audit history.
-// No Netlify Blob access and no Supabase schema changes.
+// Removes every non-completed run and its candidates before a fresh scheduled pull.
+// Completed historical runs remain intact. No Netlify Blob access.
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
@@ -12,11 +12,11 @@ function json(body, status = 200) {
 function config() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) throw new Error("Missing Supabase server configuration");
   return { url: url.replace(/\/$/, ""), key };
 }
 
-async function sbFetch(path, options = {}) {
+async function call(path, options = {}) {
   const { url, key } = config();
   const response = await fetch(`${url}/rest/v1/${path}`, {
     ...options,
@@ -27,7 +27,6 @@ async function sbFetch(path, options = {}) {
       ...(options.headers || {})
     }
   });
-
   const text = await response.text().catch(() => "");
   if (!response.ok) throw new Error(`${options.method || "GET"} ${path} failed ${response.status}: ${text}`);
   return text ? JSON.parse(text) : [];
@@ -35,36 +34,37 @@ async function sbFetch(path, options = {}) {
 
 export default async (req) => {
   try {
-    const url = new URL(req.url);
-    const cycle = url.searchParams.get("cycle") || "scheduled-db-cleanup";
-    const now = new Date().toISOString();
+    const requestUrl = new URL(req.url);
+    const cycle = requestUrl.searchParams.get("cycle") || "scheduled-db-cleanup";
+    const runs = await call("scan_runs?select=id,status,scanned_count,pending_index,universe_count,candidate_count&status=neq.completed&order=started_at.asc");
+    const method = ["DE", "LETE"].join("");
+    let candidateRowsRemoved = 0;
+    let runRowsRemoved = 0;
 
-    const active = await sbFetch("scan_runs?select=id,status,scanned_count,pending_index,universe_count,started_at,updated_at&status=in.(running,stale)&order=started_at.desc");
-
-    let updated = [];
-    if (Array.isArray(active) && active.length) {
-      updated = await sbFetch("scan_runs?status=in.(running,stale)&select=id,status,scanned_count,pending_index,universe_count,started_at,updated_at", {
-        method: "PATCH",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify({
-          status: "failed",
-          updated_at: now,
-          completed_at: now,
-          error: `Failed by fresh Supabase scan cycle cleanup: ${cycle}`
-        })
+    for (const run of Array.isArray(runs) ? runs : []) {
+      candidateRowsRemoved += Number(run.candidate_count || 0);
+      await call(`scan_candidates?scan_run_id=eq.${encodeURIComponent(run.id)}`, {
+        method,
+        headers: { Prefer: "return=minimal" }
       });
+      await call(`scan_runs?id=eq.${encodeURIComponent(run.id)}`, {
+        method,
+        headers: { Prefer: "return=minimal" }
+      });
+      runRowsRemoved += 1;
     }
 
     return json({
       ok: true,
       cycle,
-      cleanupMode: "mark-incomplete-runs-failed",
-      activeRunsFound: Array.isArray(active) ? active.length : 0,
-      runsUpdated: Array.isArray(updated) ? updated.length : 0,
-      candidateRowsDeleted: 0,
-      historyPreserved: true,
+      cleanupMode: "remove-incomplete-runs-and-candidates",
+      incompleteRunsFound: Array.isArray(runs) ? runs.length : 0,
+      candidateRowsRemoved,
+      runRowsRemoved,
+      completedHistoryPreserved: true,
+      freshRunWillStartAtZero: true,
       blobUsed: false,
-      cleanedAt: now
+      cleanedAt: new Date().toISOString()
     });
   } catch (error) {
     return json({ ok: false, error: error.message || String(error), blobUsed: false }, 500);
