@@ -9,7 +9,7 @@ const MAX_RUN_MS = 20 * 1000;
 const SP500_CSV = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv";
 const STRATEGY = "SP500_Tight_Condor_Scan_v3_SchwabLive";
 const SCAN_MODE = "Schwab live · Monthly option chain only · 15-45 DTE · Supabase persistence";
-const DATA_SOURCE = "Schwab/TOS Market Data API; ingestion extracts monthly option-chain records with 15-45 DTE only. All other filters are user Band Intake controls.";
+const DATA_SOURCE = "Schwab/TOS Market Data API; ingestion extracts monthly option-chain records with 15-45 DTE only using Pacific market-date calculation. All other filters are user Band Intake controls.";
 const UPSTREAM_FILTERS_ONLY = ["Schwab live option chain", "Monthly third-Friday expiration", "15-45 DTE", "Duplicate structural record removal"];
 
 const CURATED = [
@@ -28,7 +28,6 @@ const round2 = v => hasNum(v) ? Number(Number(v).toFixed(2)) : null;
 const bid = o => num(o.bid) ?? 0;
 const ask = o => num(o.ask) ?? 0;
 const mark = o => num(o.mark) ?? ((bid(o) + ask(o)) / 2);
-const mid = o => round2(mark(o));
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
@@ -89,7 +88,7 @@ async function loadUniverse() {
 
 async function loadEarnings(days = 90) {
   const map = {}, base = Date.now(), queue = [];
-  for (let i = 0; i <= days; i++) queue.push(new Date(base + i * 864e5).toISOString().slice(0, 10));
+  for (let i = 0; i <= days; i++) queue.push(pacificDateString(i, base));
   async function worker() {
     while (queue.length) {
       const d = queue.shift();
@@ -109,16 +108,33 @@ function baseUrl(req) {
   catch (_) { return process.env.URL || process.env.DEPLOY_URL || ""; }
 }
 
-function offsetDate(days) {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+function ymdFromDate(d) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
+function pacificDateString(addDays = 0, baseMs = Date.now()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(baseMs));
+  const y = Number(parts.find(p => p.type === "year")?.value);
+  const m = Number(parts.find(p => p.type === "month")?.value);
+  const d = Number(parts.find(p => p.type === "day")?.value);
+  const utc = new Date(Date.UTC(y, m - 1, d + Number(addDays || 0)));
+  return ymdFromDate(utc);
+}
+
+function offsetDate(days) { return pacificDateString(days); }
+
 function dteOf(expiry) {
-  const d = new Date();
-  const now = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return Math.round((Date.parse(`${expiry}T00:00:00Z`) - now) / 864e5);
+  if (!expiry) return null;
+  const today = pacificDateString(0);
+  const [ty, tm, td] = today.split("-").map(Number);
+  const [ey, em, ed] = String(expiry).slice(0, 10).split("-").map(Number);
+  if (![ty, tm, td, ey, em, ed].every(Number.isFinite)) return null;
+  const now = Date.UTC(ty, tm - 1, td);
+  const exp = Date.UTC(ey, em - 1, ed);
+  return Math.round((exp - now) / 864e5);
 }
 
 function isThirdFriday(expiry) {
@@ -151,12 +167,12 @@ function schwabOptionRows(chain) {
   for (const item of items) {
     const c = item.contract || {};
     const expiry = expiryOf(c, item.expKey);
-    const dte = num(c.daysToExpiration) ?? dteOf(expiry);
+    const dte = dteOf(expiry);
     if (!expiry || dte < 15 || dte > 45 || !isThirdFriday(expiry)) continue;
     const type = c.putCall === "CALL" ? "C" : c.putCall === "PUT" ? "P" : item.optionType;
     const strike = num(c.strikePrice);
     if (!type || !strike) continue;
-    rows.push({ ...c, type, strike, dte, ek: expiry, spot, option: c.symbol || c.description });
+    rows.push({ ...c, type, strike, dte, ek: expiry, spot, option: c.symbol || c.description, schwabDaysToExpiration: c.daysToExpiration ?? null });
   }
   return rows;
 }
@@ -241,7 +257,7 @@ function scanAll(chain, sym, name, sector, market, earningsMap = {}, todayStr = 
         const longPutOI = num(lp.openInterest) || 0, longCallOI = num(lc.openInterest) || 0;
         const em = expectedMoveFields(spot, iv, sc.dte, sp.strike, sc.strike);
         const score = qualityScore({ roc, probOtm, iv, monthlyOI, shortPutOI, shortCallOI, spreadMax, earnInWindow, expectedMoveStatus: em.expectedMoveStatus, credit, width });
-        out.push({ symbol: sym, name, sector, market: market || "both", spot: round2(spot), iv: round2(iv), hv: round2(iv), dte: sc.dte, expiry: ek, earnings: earnInWindow, earnings_date: earnInWindow ? erDate : null, next_earnings: erDate, short_put: sp.strike, long_put: lp.strike, short_call: sc.strike, long_call: lc.strike, credit, mid_credit: midCredit, width, max_risk: maxRisk, roc, prob_otm: probOtm, put_prob_otm: putProbOtm, call_prob_otm: callProbOtm, short_delta: +Math.max(putDelta, callDelta).toFixed(3), open_interest: monthlyOI, short_put_oi: shortPutOI, short_call_oi: shortCallOI, long_put_oi: longPutOI, long_call_oi: longCallOI, spread_max: spreadMax, expected_move: em.expectedMove, expected_low: em.expectedLow, expected_high: em.expectedHigh, expected_move_status: em.expectedMoveStatus, passed: true, score, review_status: "Raw Schwab monthly-chain candidate — apply Band Intake filters", note: "Raw Schwab candidate. User Band Intake values determine display eligibility.", raw_chain_eligible: true, raw_chain_rule: "Schwab live monthly third-Friday expiration, 15-45 DTE only", source_payload: { symbol: sym, option_put_short: sp.option, option_put_long: lp.option, option_call_short: sc.option, option_call_long: lc.option } });
+        out.push({ symbol: sym, name, sector, market: market || "both", spot: round2(spot), iv: round2(iv), hv: round2(iv), dte: sc.dte, expiry: ek, earnings: earnInWindow, earnings_date: earnInWindow ? erDate : null, next_earnings: erDate, short_put: sp.strike, long_put: lp.strike, short_call: sc.strike, long_call: lc.strike, credit, mid_credit: midCredit, width, max_risk: maxRisk, roc, prob_otm: probOtm, put_prob_otm: putProbOtm, call_prob_otm: callProbOtm, short_delta: +Math.max(putDelta, callDelta).toFixed(3), open_interest: monthlyOI, short_put_oi: shortPutOI, short_call_oi: shortCallOI, long_put_oi: longPutOI, long_call_oi: longCallOI, spread_max: spreadMax, expected_move: em.expectedMove, expected_low: em.expectedLow, expected_high: em.expectedHigh, expected_move_status: em.expectedMoveStatus, passed: true, score, review_status: "Raw Schwab monthly-chain candidate — apply Band Intake filters", note: "Raw Schwab candidate. User Band Intake values determine display eligibility.", raw_chain_eligible: true, raw_chain_rule: "Schwab live monthly third-Friday expiration, 15-45 DTE only using Pacific market date", source_payload: { symbol: sym, option_put_short: sp.option, option_put_long: lp.option, option_call_short: sc.option, option_call_long: lc.option, schwab_dte_put: sp.schwabDaysToExpiration, schwab_dte_call: sc.schwabDaysToExpiration } });
       }
     }
   }
@@ -266,7 +282,7 @@ async function candidateCount(scanRunId) { return sbCount("scan_candidates", `sc
 async function createRun() {
   const universe = await loadUniverse();
   const earnings = await loadEarnings(90);
-  const body = [{ strategy: STRATEGY, status: "running", scan_mode: SCAN_MODE, data_source: DATA_SOURCE, universe_count: universe.length, scanned_count: 0, candidate_count: 0, pass_count: 0, pending_index: 0, metadata: { universe, earnings, createdBy: "scan-build-db-schwab-live", backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY } }];
+  const body = [{ strategy: STRATEGY, status: "running", scan_mode: SCAN_MODE, data_source: DATA_SOURCE, universe_count: universe.length, scanned_count: 0, candidate_count: 0, pass_count: 0, pending_index: 0, metadata: { universe, earnings, createdBy: "scan-build-db-schwab-live", backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, marketDate: pacificDateString(0), fromDate: offsetDate(15), toDate: offsetDate(45), dteBasis: "America/Los_Angeles market date" } }];
   const { data } = await sbFetch("scan_runs?select=*", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(body) });
   return data[0];
 }
@@ -285,7 +301,7 @@ export default async (req) => {
   let earnings = run.metadata?.earnings || null;
   if (!universe) universe = await loadUniverse();
   if (!earnings) earnings = await loadEarnings(90);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = pacificDateString(0);
   let pending = Math.max(0, Number(run.pending_index || 0));
   let scanned = Math.max(0, Number(run.scanned_count || 0));
   const total = universe.length;
@@ -309,7 +325,7 @@ export default async (req) => {
       pending += batch.length;
       batchesProcessed++;
       const count = await candidateCount(run.id);
-      await updateRun(run.id, { status: pending >= total ? "completed" : "running", universe_count: total, scanned_count: scanned, pending_index: pending, candidate_count: count, pass_count: count, completed_at: pending >= total ? new Date().toISOString() : null, error: null, metadata: { ...(run.metadata || {}), universe, earnings, backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, batchSize: CHUNK, concurrency: CONCURRENCY, batchesProcessed, lastSymbolBatchSize: batch.length, lastGeneratedRows: lastBatchRows, lastInsertedRows, lastContinuationAt: new Date().toISOString() } });
+      await updateRun(run.id, { status: pending >= total ? "completed" : "running", universe_count: total, scanned_count: scanned, pending_index: pending, candidate_count: count, pass_count: count, completed_at: pending >= total ? new Date().toISOString() : null, error: null, metadata: { ...(run.metadata || {}), universe, earnings, backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, marketDate: todayStr, fromDate: offsetDate(15), toDate: offsetDate(45), dteBasis: "America/Los_Angeles market date", batchSize: CHUNK, concurrency: CONCURRENCY, batchesProcessed, lastSymbolBatchSize: batch.length, lastGeneratedRows: lastBatchRows, lastInsertedRows, lastContinuationAt: new Date().toISOString() } });
     }
   } catch (err) {
     try { await updateRun(run.id, { status: "failed", error: String(err?.message || err) }); } catch (_) {}
@@ -321,5 +337,5 @@ export default async (req) => {
     if (base) { try { fetch(`${base}/.netlify/functions/scan-build-db?continue=1&scanRunId=${encodeURIComponent(run.id)}`, { method: "POST" }); } catch (_) {} }
   }
   const count = await candidateCount(run.id);
-  return json({ ok: true, scanRunId: run.id, status: complete ? "completed" : "running", scanned, total, pendingIndex: pending, candidateCount: count || 0, lastBatchRows, lastInsertedRows, batchesProcessed, backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, dataSource: "Schwab/TOS Market Data API", marketDataOnly: true, tokenReturnedToFrontend: false, accountDataReturnedToFrontend: false, framework: "v3 Schwab live monthly-chain first · Supabase REST persistence" });
+  return json({ ok: true, scanRunId: run.id, status: complete ? "completed" : "running", scanned, total, pendingIndex: pending, candidateCount: count || 0, lastBatchRows, lastInsertedRows, batchesProcessed, backendFiltersRemoved: true, upstreamFiltersOnly: UPSTREAM_FILTERS_ONLY, dataSource: "Schwab/TOS Market Data API", marketDataOnly: true, tokenReturnedToFrontend: false, accountDataReturnedToFrontend: false, dteBasis: "America/Los_Angeles market date", marketDate: todayStr, fromDate: offsetDate(15), toDate: offsetDate(45), framework: "v3 Schwab live monthly-chain first · Supabase REST persistence" });
 };
