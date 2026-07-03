@@ -1,6 +1,8 @@
 // POPPA'S Option Scanner v3 — durable Supabase scan orchestrator.
-// Runs the existing scan-build-db batches repeatedly in a Netlify Background Function.
+// Calls the existing DB batch builder directly and suppresses its legacy fire-and-forget continuation.
 // Supabase remains the source of truth; Netlify Blob is not used here.
+
+import scanBuildDb from "./scan-build-db.js";
 
 const MAX_ORCHESTRATOR_MS = 13 * 60 * 1000;
 const CONTINUATION_BUFFER_MS = 45 * 1000;
@@ -25,28 +27,58 @@ function baseUrl(req) {
   }
 }
 
+function isLegacyBuilderContinuation(input) {
+  try {
+    const value = typeof input === "string" ? input : input?.url;
+    const url = new URL(value);
+    return url.pathname.endsWith("/.netlify/functions/scan-build-db") && url.searchParams.get("continue") === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
 async function invokeBuilder(base, restart) {
   const url = new URL(`${base}/.netlify/functions/scan-build-db`);
   url.searchParams.set(restart ? "restart" : "continue", "1");
   url.searchParams.set("orchestrated", "1");
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Accept": "application/json", "X-POPPA-DB-Orchestrator": "true" }
-  });
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (isLegacyBuilderContinuation(input)) {
+      return new Response(JSON.stringify({
+        ok: true,
+        suppressed: true,
+        reason: "Durable background orchestrator owns continuation"
+      }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return nativeFetch(input, init);
+  };
 
-  const text = await response.text();
-  let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch (_) { body = { raw: text.slice(0, 1000) }; }
+  try {
+    const response = await scanBuildDb(new Request(url, {
+      method: "POST",
+      headers: { "Accept": "application/json", "X-POPPA-DB-Orchestrator": "true" }
+    }));
 
-  if (!response.ok || body?.ok === false) {
-    const error = new Error(body?.error || `scan-build-db failed with ${response.status}`);
-    error.status = response.status || 500;
-    error.details = body;
-    throw error;
+    const text = await response.text();
+    let body = null;
+    try { body = text ? JSON.parse(text) : null; }
+    catch (_) { body = { raw: text.slice(0, 1000) }; }
+
+    if (!response.ok || body?.ok === false) {
+      const error = new Error(body?.error || `scan-build-db failed with ${response.status}`);
+      error.status = response.status || 500;
+      error.details = body;
+      throw error;
+    }
+
+    return body || {};
+  } finally {
+    globalThis.fetch = nativeFetch;
   }
-
-  return body || {};
 }
 
 async function dispatchContinuation(base, cycle) {
@@ -124,6 +156,7 @@ export default async (req) => {
       candidateCount: Number(last?.candidateCount || 0),
       lastBuilderResult: last,
       continuation,
+      legacyBuilderContinuationSuppressed: true,
       blobUsed: false
     });
   } catch (error) {
@@ -143,6 +176,7 @@ export default async (req) => {
       elapsedSeconds,
       error: error.message || String(error),
       details: error.details || null,
+      legacyBuilderContinuationSuppressed: true,
       blobUsed: false
     }, error.status || 500);
   }
