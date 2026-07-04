@@ -4,13 +4,41 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>POPPA’S Scanner Table Preview</title>
-  <meta http-equiv="refresh" content="0; url=/scanner-table-preview.html" />
-  <script>
-    window.location.replace('/scanner-table-preview.html' + window.location.hash);
-  </script>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #020816;
+    }
+    iframe {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      border: 0;
+      background: #020816;
+    }
+    .fallback {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      z-index: 2;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      color: #b8c8e8;
+    }
+    .fallback a {
+      color: #7bdcff;
+    }
+  </style>
 </head>
 <body>
-  <p>Loading POPPA’S Scanner Table Preview…</p>
-  <p><a href="/scanner-table-preview.html">Open Scanner Table Preview</a></p>
+  <iframe src="/scanner-table-preview.html" title="POPPA’S Scanner Table Preview"></iframe>
+  <noscript>
+    <div class="fallback">
+      JavaScript is required. Open <a href="/scanner-table-preview.html">Scanner Table Preview</a>.
+    </div>
+  </noscript>
 </body>
 </html>
