@@ -21,6 +21,12 @@ const envGet = name => {
   return process.env[name];
 };
 
+const normalizeUrl = value => {
+  let url = String(value || '').trim().replace(/\/$/, '');
+  if (url && !/^https?:\/\//i.test(url)) url = `https://${url}`;
+  return url;
+};
+
 const num = (v, d = null) => {
   if (v === null || v === undefined || v === '') return d;
   const n = Number(v);
@@ -62,7 +68,7 @@ function mapRow(r) {
     actualPutWidth: num(r.actual_put_width),
     actualCallWidth: num(r.actual_call_width),
     strikeValidationStatus: r.strike_validation_status || 'PASS',
-    strikeValidationReason: r.strike_validation_reason || 'Exact strikes confirmed',
+    strikeValidationReason: r.strike_validation_reason || 'Validation pending; database row has no rejection status',
     naturalCredit: num(r.natural_credit ?? r.credit),
     midpointCredit: num(r.midpoint_credit ?? r.mid_credit ?? r.credit),
     displayedCredit,
@@ -101,12 +107,9 @@ function mapRow(r) {
 }
 
 async function supabaseRows(path) {
-  const rawUrl = envGet('SUPABASE_URL') || '';
-  const url = rawUrl.replace(/\/$/, '');
+  const url = normalizeUrl(envGet('SUPABASE_URL'));
   const key = envGet('SUPABASE_SERVICE_ROLE_KEY') || envGet('SUPABASE_SERVICE_KEY') || envGet('SUPABASE_ANON_KEY');
-  if (!url || !key) {
-    throw new Error(`Missing Supabase env. SUPABASE_URL=${url ? 'present' : 'missing'} SERVICE_ROLE=${envGet('SUPABASE_SERVICE_ROLE_KEY') ? 'present' : 'missing'} ANON=${envGet('SUPABASE_ANON_KEY') ? 'present' : 'missing'}`);
-  }
+  if (!url || !key) throw new Error(`Missing Supabase env. SUPABASE_URL=${url ? 'present' : 'missing'} SERVICE_ROLE=${envGet('SUPABASE_SERVICE_ROLE_KEY') ? 'present' : 'missing'} ANON=${envGet('SUPABASE_ANON_KEY') ? 'present' : 'missing'}`);
   const response = await fetch(`${url}/rest/v1/${path}`, {
     headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' }
   });
@@ -138,8 +141,8 @@ export default async (req) => {
     params.append('dte', 'lte.45');
     params.set('put_prob_otm', 'gte.0.8');
     params.set('call_prob_otm', 'gte.0.8');
-    if (!includeRejected) params.set('strike_validation_status', 'eq.PASS');
-    params.set('order', 'roc_after_commission_and_fees.desc.nullslast,score.desc.nullslast,updated_at.desc');
+    if (includeRejected) params.set('order', 'updated_at.desc');
+    else params.set('order', 'roc_after_commission_and_fees.desc.nullslast,score.desc.nullslast,updated_at.desc');
     params.set('limit', String(limit));
 
     const rows = await supabaseRows(`scan_candidates?${params.toString()}`);
@@ -156,7 +159,7 @@ export default async (req) => {
       withCondor: results.length,
       passCount: results.filter(r => r.strikeValidationStatus === 'PASS').length,
       includeRejected,
-      approvedRetrievalFilters: { monthlyOptionsChainOnly: true, rawChainEligible: true, dteMin: 0, dteMax: 45, putProbabilityOtmMin: 0.8, callProbabilityOtmMin: 0.8 },
+      approvedRetrievalFilters: { monthlyOptionsChainOnly: true, rawChainEligible: true, dteMin: 0, dteMax: 45, putProbabilityOtmMin: 0.8, callProbabilityOtmMin: 0.8, strikeValidationStatusRequired: false },
       lowerAnchorLabel: 'Lower Anchor P(OTM)',
       pricingMethod: 'Bid/ask midpoint',
       commission: COMMISSION_DOLLARS,
@@ -167,11 +170,6 @@ export default async (req) => {
     });
   } catch (error) {
     console.error('[scan-results] Supabase candidate load failed:', error && error.message ? error.message : error);
-    return json({
-      error: true,
-      message: error && error.message ? error.message : String(error),
-      results: [],
-      dataMode: 'Supabase candidate load failed'
-    }, 200);
+    return json({ error: true, message: error && error.message ? error.message : String(error), results: [], dataMode: 'Supabase candidate load failed' }, 200);
   }
 };
