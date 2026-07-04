@@ -1,10 +1,10 @@
-// POPPA'S Option Scanner v3 — Supabase REST results endpoint.
-// Applies user Band Intake values server-side, then returns one page of rows.
-// Page size UX standard: 50 records at a time. CTA: Scan Next 50.
+// POPPA'S Option Scanner v4 — Supabase REST results endpoint.
+// Scope: data wiring only. No UI, layout, or design changes.
+// Reads the latest completed Schwab/Supabase candidate run from scan_candidates.
 
-const DEFAULT_STRATEGY = "SP500_Tight_Condor_Scan_v3_RawMonthlyFirst";
-const DEFAULT_SCAN_MODE = "CBOE EOD · Monthly option chain only · 15-45 DTE · Supabase persistence";
-const DEFAULT_DATA_SOURCE = "CBOE EOD/delayed quotes; Band Intake values are applied in the Supabase REST read endpoint";
+const DEFAULT_STRATEGY = "SP500_Tight_Condor_Scan_v3_SchwabLive";
+const DEFAULT_SCAN_MODE = "Schwab live · Monthly option chain only · 0-45 DTE · Supabase persistence";
+const DEFAULT_DATA_SOURCE = "Schwab/TOS Market Data API; Band Intake values are applied in the Supabase REST read endpoint.";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body, null, 2), {
@@ -52,16 +52,23 @@ function pct(v) {
 function enc(v) { return encodeURIComponent(String(v)); }
 
 async function latestRun() {
-  const { data } = await sbFetch("scan_runs?select=*&order=started_at.desc&limit=1");
-  return Array.isArray(data) ? data[0] : null;
+  const completedPath = `scan_runs?select=*&strategy=eq.${enc(DEFAULT_STRATEGY)}&status=eq.completed&order=completed_at.desc&limit=1`;
+  const completed = await sbFetch(completedPath);
+  if (Array.isArray(completed.data) && completed.data[0]) return completed.data[0];
+
+  const activePath = `scan_runs?select=*&strategy=eq.${enc(DEFAULT_STRATEGY)}&status=in.(running,stale)&order=started_at.desc&limit=1`;
+  const active = await sbFetch(activePath);
+  if (Array.isArray(active.data) && active.data[0]) return active.data[0];
+
+  const fallback = await sbFetch("scan_runs?select=*&order=started_at.desc&limit=1");
+  return Array.isArray(fallback.data) ? fallback.data[0] : null;
 }
 
 function readFilters(url) {
   const q = url.searchParams;
   const rawLimit = n(q.get("limit"), 50);
-  const limit = Math.max(1, Math.min(50, Math.floor(rawLimit || 50)));
   return {
-    limit,
+    limit: Math.max(1, Math.min(50, Math.floor(rawLimit || 50))),
     offset: Math.max(0, Math.floor(n(q.get("offset"), 0))),
     rocMin: n(q.get("rocMin"), 5),
     rocMax: n(q.get("rocMax"), 10),
@@ -70,7 +77,7 @@ function readFilters(url) {
     minOI: n(q.get("minOI"), 10000),
     minShortOI: n(q.get("minShortOI"), 1),
     maxSpread: n(q.get("maxSpread"), 0.25),
-    dteMin: n(q.get("dteMin"), 15),
+    dteMin: n(q.get("dteMin"), 0),
     dteMax: n(q.get("dteMax"), 45),
     excludeEarnings: String(q.get("excludeEarnings") || "yes").toLowerCase(),
     idx: String(q.get("idx") || "both").toLowerCase(),
@@ -89,7 +96,8 @@ function orderFor(rankBy) {
   return "score.desc,roc.desc,prob_otm.desc";
 }
 
-function addBandFilters(params, f) {
+function addBandFilters(params, f, options = {}) {
+  const includeExpectedMove = options.includeExpectedMove !== false;
   params.push(`roc=gte.${enc(f.rocMin)}`);
   params.push(`roc=lte.${enc(f.rocMax)}`);
   params.push(`prob_otm=gte.${enc(f.minProb)}`);
@@ -116,11 +124,13 @@ function addBandFilters(params, f) {
     params.push("iv=lt.40");
   }
 
-  const em = f.emStatus.toLowerCase();
-  if (em && em !== "all") {
-    if (em.includes("outside")) params.push("or=(expected_move_status.eq.Outside%20EM,expected_move_status.eq.Outside%20Expected%20Move)");
-    else if (em.includes("inside")) params.push("expected_move_status=eq.Inside%20EM");
-    else if (em.includes("near")) params.push("expected_move_status=eq.Near%20EM");
+  if (includeExpectedMove) {
+    const em = f.emStatus.toLowerCase();
+    if (em && em !== "all") {
+      if (em.includes("outside")) params.push("or=(expected_move_status.eq.Outside%20EM,expected_move_status.eq.Outside%20Expected%20Move)");
+      else if (em.includes("inside")) params.push("expected_move_status=eq.Inside%20EM");
+      else if (em.includes("near")) params.push("expected_move_status=eq.Near%20EM");
+    }
   }
 }
 
@@ -180,6 +190,33 @@ function mapRow(r) {
   };
 }
 
+async function countForRun(scanRunId) {
+  const { headers } = await sbFetch(`scan_candidates?select=id&scan_run_id=eq.${enc(scanRunId)}`, {
+    method: "HEAD",
+    headers: { Prefer: "count=exact" }
+  });
+  return contentRangeCount(headers, 0);
+}
+
+async function readRows(run, f, options = {}) {
+  const params = [`select=*`, `scan_run_id=eq.${enc(run.id)}`];
+  addBandFilters(params, f, options);
+  params.push(`order=${orderFor(f.rankBy)}`);
+  const path = `scan_candidates?${params.join("&")}`;
+  const rangeEnd = f.offset + f.limit - 1;
+  const { data, headers } = await sbFetch(path, {
+    method: "GET",
+    headers: {
+      Prefer: "count=exact",
+      Range: `${f.offset}-${rangeEnd}`,
+      "Range-Unit": "items"
+    }
+  });
+  const rows = Array.isArray(data) ? data.map(mapRow) : [];
+  const matched = contentRangeCount(headers, rows.length);
+  return { rows, matched };
+}
+
 export default async (req) => {
   try {
     const url = new URL(req.url);
@@ -217,22 +254,19 @@ export default async (req) => {
       });
     }
 
-    const params = [`select=*`, `scan_run_id=eq.${enc(run.id)}`];
-    addBandFilters(params, f);
-    params.push(`order=${orderFor(f.rankBy)}`);
-    const path = `scan_candidates?${params.join("&")}`;
-    const rangeEnd = f.offset + f.limit - 1;
-    const { data, headers } = await sbFetch(path, {
-      method: "GET",
-      headers: {
-        Prefer: "count=exact",
-        Range: `${f.offset}-${rangeEnd}`,
-        "Range-Unit": "items"
-      }
-    });
+    const rawCandidateCount = await countForRun(run.id);
+    let relaxedPreviewFallback = false;
+    let { rows, matched } = await readRows(run, f, { includeExpectedMove: true });
 
-    const rows = Array.isArray(data) ? data.map(mapRow) : [];
-    const matched = contentRangeCount(headers, rows.length);
+    if (!rows.length && rawCandidateCount > 0 && f.emStatus.toLowerCase().includes("outside")) {
+      const relaxed = await readRows(run, f, { includeExpectedMove: false });
+      if (relaxed.rows.length) {
+        rows = relaxed.rows;
+        matched = relaxed.matched;
+        relaxedPreviewFallback = true;
+      }
+    }
+
     const nextOffset = f.offset + rows.length < matched ? f.offset + rows.length : null;
     const building = ["running", "stale"].includes(String(run.status || "").toLowerCase());
 
@@ -248,8 +282,8 @@ export default async (req) => {
       progress: { scanned: run.scanned_count || 0, total: run.universe_count || 0 },
       universeCount: run.universe_count || 0,
       scanned: run.scanned_count || 0,
-      total: run.candidate_count || matched,
-      withCondor: run.candidate_count || matched,
+      total: rawCandidateCount || run.candidate_count || matched,
+      withCondor: rawCandidateCount || run.candidate_count || matched,
       passCount: matched,
       matched,
       returned: rows.length,
@@ -258,10 +292,12 @@ export default async (req) => {
       hasRows: rows.length > 0,
       hasMore: nextOffset !== null,
       nextOffset,
-      filterMode: "supabase-band-aware-page",
+      filterMode: relaxedPreviewFallback ? "supabase-live-preview-relaxed-em-page" : "supabase-band-aware-page",
       processingMode: "supabase-rest-filter-page",
       serverFiltersApplied: true,
       backendFiltersRemoved: true,
+      relaxedPreviewFallback,
+      relaxedPreviewFallbackReason: relaxedPreviewFallback ? "Default Outside Expected Move display filter returned zero rows for the completed Schwab run; live preview rows were returned using all other approved filters." : null,
       pageCta: "Scan Next 50",
       filters: f,
       results: rows
