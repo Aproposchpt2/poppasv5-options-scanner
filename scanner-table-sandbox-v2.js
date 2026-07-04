@@ -1,10 +1,8 @@
-// POPPA'S Scanner Table Sandbox — recovered live-data controller.
-// V4 clone only. Removes legacy sample-data fallback UI and renders from Netlify/Supabase candidate endpoint.
+// POPPA'S Scanner Table Sandbox — recovered live-data controller with BX ticket population.
 (function () {
   'use strict';
 
   const RESULTS_ENDPOINT = '/.netlify/functions/scan-results';
-  const EXPORT_ENDPOINT = '/.netlify/functions/scan-export';
   const COMMISSION = 2.40;
   const FEES = 0.04;
   const TOTAL_COST = COMMISSION + FEES;
@@ -44,16 +42,16 @@
       .recovered-source-note{font-size:.78rem;color:var(--muted);margin-top:5px;white-space:normal;min-width:170px}
       .strike-pass{color:var(--green);font-weight:900}.strike-rejected{color:var(--red);font-weight:900}
       .table-wrap table{min-width:4200px}.table-wrap th{cursor:pointer}.table-wrap td{white-space:nowrap}.table-wrap td:last-child{white-space:normal;min-width:240px}
-      #recoveredOrderTicket{margin-top:18px}.recovered-ticket-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;margin-top:14px}
-      .recovered-ticket-item{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(255,255,255,.04)}
-      .recovered-ticket-item span{display:block;color:var(--muted);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase}.recovered-ticket-item strong{display:block;color:#fff;margin-top:4px}
-      @media(max-width:700px){.recovered-ticket-grid{grid-template-columns:1fr}.table-wrap{max-width:100%;overflow-x:auto}}
+      #recoveredOrderTicket{margin-top:18px}.recovered-ticket-grid,.ticket-live-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;margin-top:14px}
+      .recovered-ticket-item,.ticket-live-item{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(255,255,255,.04)}
+      .recovered-ticket-item span,.ticket-live-item span{display:block;color:var(--muted);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase}.recovered-ticket-item strong,.ticket-live-item strong{display:block;color:#fff;margin-top:4px}
+      .ticket-live-item.sell strong{color:var(--green)}.ticket-live-item.buy strong{color:var(--cyan)}.ticket-live-item.warn strong{color:var(--amber)}
+      @media(max-width:700px){.recovered-ticket-grid,.ticket-live-grid{grid-template-columns:1fr}.table-wrap{max-width:100%;overflow-x:auto}}
     `;
     document.head.appendChild(s);
   }
 
   function normalize(r) {
-    const raw = r.rawLegs || {};
     const shortPut = num(pick(r.shortPut, r.short_put));
     const longPut = num(pick(r.longPut, r.long_put));
     const shortCall = num(pick(r.shortCall, r.short_call));
@@ -66,7 +64,7 @@
     const anchorCallOTM = num(pick(r.anchorCallOTM, r.callProbOtm, r.call_prob_otm));
     const naturalCredit = num(pick(r.naturalCredit, r.credit));
     const midpointCredit = num(pick(r.midpointCredit, r.midCredit, r.mid_credit, r.credit));
-    const displayedCredit = midpointCredit;
+    const displayedCredit = num(pick(r.displayedCredit, r.displayed_credit, midpointCredit));
     const grossCreditDollars = displayedCredit !== null ? displayedCredit * 100 : null;
     const netCreditAfterCosts = grossCreditDollars !== null ? grossCreditDollars - TOTAL_COST : null;
     const grossMaxRisk = requestedWidth !== null && grossCreditDollars !== null ? requestedWidth * 100 - grossCreditDollars : null;
@@ -74,7 +72,7 @@
     const grossROC = num(pick(r.grossROC, r.roc), grossCreditDollars !== null && grossMaxRisk > 0 ? grossCreditDollars / grossMaxRisk * 100 : null);
     const rocAfterCommissionAndFees = num(pick(r.rocAfterCommissionAndFees, r.rocAfterCosts), netCreditAfterCosts !== null && netMaxRiskAfterCosts > 0 ? netCreditAfterCosts / netMaxRiskAfterCosts * 100 : null);
     const strikeValidationStatus = pick(r.strikeValidationStatus, r.strike_validation_status, 'PASS');
-    const strikeValidationReason = pick(r.strikeValidationReason, r.strike_validation_reason, 'Exact strikes confirmed');
+    const strikeValidationReason = pick(r.strikeValidationReason, r.strike_validation_reason, 'Validation pending; database row has no rejection status');
     return {
       ...r,
       symbol: pick(r.symbol, r.ticker),
@@ -97,8 +95,7 @@
       earnings: pick(r.earnings, r.earn),
       strikeValidationStatus,
       strikeValidationReason,
-      reviewStatus: pick(r.reviewStatus, r.review_status, strikeValidationStatus === 'PASS' ? 'Matches primary filters ✓' : 'REJECTED — ' + strikeValidationReason),
-      rawLegs: raw
+      reviewStatus: pick(r.reviewStatus, r.review_status, strikeValidationStatus === 'PASS' ? 'Matches primary filters ✓' : 'REJECTED — ' + strikeValidationReason)
     };
   }
 
@@ -109,31 +106,28 @@
     const wrap = body.closest('.table-wrap') || table;
     if (!table || !wrap) return;
 
-    table.querySelector('thead').innerHTML = `<tr>
-      ${[
-        ['review','Review'],['symbol','Symbol'],['expiry','Expiration'],['dte','DTE'],['spot','Spot'],
-        ['shortPut','Short Put'],['longPut','Long Put'],['shortCall','Short Call'],['longCall','Long Call'],['requestedWidth','Width'],
-        ['anchorPutOTM','Anchor P(OTM)'],['anchorCallOTM','Anchor C(OTM)'],['lowerAnchorPOTM','Lower Anchor P(OTM)'],
-        ['naturalCredit','Natural Credit'],['midpointCredit','Midpoint Credit'],['displayedCredit','Displayed Credit'],
-        ['grossROC','Gross ROC'],['rocAfterCommissionAndFees','ROC After Costs'],['monthlyChainIV','Monthly Chain IV'],
-        ['openInterest','Monthly Chain OI'],['shortPutOI','Short Put OI'],['shortCallOI','Short Call OI'],['spreadMax','Max B/A Spread'],
-        ['expectedMove','Expected Move'],['expectedMoveStatus','EM Status'],['earnings','Earnings'],['strikeValidationStatus','Strike Validation'],['reviewStatus','Review Status']
-      ].map(([k,l]) => `<th data-sort="${k}">${l}</th>`).join('')}
-    </tr>`;
+    table.querySelector('thead').innerHTML = `<tr>${[
+      ['review','Review'],['symbol','Symbol'],['expiry','Expiration'],['dte','DTE'],['spot','Spot'],
+      ['shortPut','Short Put'],['longPut','Long Put'],['shortCall','Short Call'],['longCall','Long Call'],['requestedWidth','Width'],
+      ['anchorPutOTM','Anchor P(OTM)'],['anchorCallOTM','Anchor C(OTM)'],['lowerAnchorPOTM','Lower Anchor P(OTM)'],
+      ['naturalCredit','Natural Credit'],['midpointCredit','Midpoint Credit'],['displayedCredit','Displayed Credit'],
+      ['grossROC','Gross ROC'],['rocAfterCommissionAndFees','ROC After Costs'],['monthlyChainIV','Monthly Chain IV'],
+      ['openInterest','Monthly Chain OI'],['shortPutOI','Short Put OI'],['shortCallOI','Short Call OI'],['spreadMax','Max B/A Spread'],
+      ['expectedMove','Expected Move'],['expectedMoveStatus','EM Status'],['earnings','Earnings'],['strikeValidationStatus','Strike Validation'],['reviewStatus','Review Status']
+    ].map(([k,l]) => `<th data-sort="${k}">${l}</th>`).join('')}</tr>`;
 
     const toolbar = document.createElement('div');
     toolbar.id = 'poppasRecoveredToolbar';
-    toolbar.innerHTML = `
-      <button id="recoveredScanNowBtn" class="btn primary" type="button">Scan Now</button>
-      <button id="recoveredScanMoreBtn" class="btn secondary" type="button">Scan For More Records</button>
-      <span id="recoveredStatus" class="pill">Waiting</span>`;
+    toolbar.innerHTML = '<button id="recoveredScanNowBtn" class="btn primary" type="button">Scan Now</button><button id="recoveredScanMoreBtn" class="btn secondary" type="button">Scan For More Records</button><span id="recoveredStatus" class="pill">Waiting</span>';
     wrap.parentNode.insertBefore(toolbar, wrap);
 
-    const panel = document.createElement('div');
-    panel.id = 'recoveredOrderTicket';
-    panel.className = 'panel';
-    panel.innerHTML = '<p class="eyebrow">Selected Candidate</p><h2 class="title">POPPA’S Educational Order Ticket</h2><div class="note"><strong>Displayed credit uses Schwab bid/ask midpoint values.</strong> Actual fills may differ.</div><div id="recoveredTicketContent" class="recovered-ticket-grid"><div class="recovered-ticket-item"><span>Status</span><strong>Select a candidate row</strong></div></div>';
-    wrap.insertAdjacentElement('afterend', panel);
+    if (!byId('recoveredOrderTicket')) {
+      const panel = document.createElement('div');
+      panel.id = 'recoveredOrderTicket';
+      panel.className = 'panel';
+      panel.innerHTML = '<p class="eyebrow">Selected Candidate</p><h2 class="title">POPPA’S Educational Order Ticket</h2><div class="note"><strong>Displayed credit uses Schwab bid/ask midpoint values.</strong> Actual fills may differ.</div><div id="recoveredTicketContent" class="recovered-ticket-grid"><div class="recovered-ticket-item"><span>Status</span><strong>Select a candidate row</strong></div></div>';
+      wrap.insertAdjacentElement('afterend', panel);
+    }
 
     byId('recoveredScanNowBtn').addEventListener('click', () => load(false));
     byId('recoveredScanMoreBtn').addEventListener('click', () => load(true));
@@ -165,7 +159,6 @@
     const dteParts = String(byId('dteWindow') ? byId('dteWindow').value : '0-45').match(/(\d+)\D+(\d+)/);
     const dteMin = dteParts ? Number(dteParts[1]) : 0;
     const dteMax = dteParts ? Number(dteParts[2]) : 45;
-
     return list.filter(r => {
       if (!includeMoreRecords && r.strikeValidationStatus !== 'PASS') return false;
       if (lowerAsPercent(r) < minProb) return false;
@@ -197,51 +190,87 @@
     });
     const maxResults = Math.max(1, Math.min(500, num(byId('maxResults') && byId('maxResults').value, 50)));
     shownRows = shownRows.slice(0, maxResults);
-
     if (byId('candidateCount')) byId('candidateCount').textContent = shownRows.length;
     if (byId('scanMode')) byId('scanMode').textContent = includeMoreRecords ? 'Expanded records' : 'Live candidates';
     if (status) status.textContent = `${shownRows.length.toLocaleString()} displayed · ${rows.length.toLocaleString()} loaded`;
-
     if (!shownRows.length) {
       body.innerHTML = '<tr><td colspan="28" class="empty">No live candidates match the current controls.</td></tr>';
+      clearTicket();
       return;
     }
-
     body.innerHTML = shownRows.map((r,i) => {
       const strikeClass = r.strikeValidationStatus === 'PASS' ? 'strike-pass' : 'strike-rejected';
       const em = String(r.expectedMoveStatus || '').toLowerCase();
       const emClass = em.includes('outside') ? 'em-out' : em.includes('inside') ? 'em-in' : em.includes('near') ? 'em-near' : 'warn';
-      return `<tr data-index="${i}">
-        <td><button class="sandbox-review-btn" type="button">Review</button></td><td><strong>${esc(r.symbol)}</strong></td><td>${esc(isoDate(r.expiry))}</td><td>${esc(r.dte)}</td><td>${money(r.spot)}</td>
-        <td>${esc(r.shortPut)}</td><td>${esc(r.longPut)}</td><td>${esc(r.shortCall)}</td><td>${esc(r.longCall)}</td><td>${money(r.requestedWidth)}</td>
-        <td>${percent(r.anchorPutOTM)}</td><td>${percent(r.anchorCallOTM)}</td><td>${percent(r.lowerAnchorPOTM)}</td>
-        <td>${money(r.naturalCredit)}</td><td>${money(r.midpointCredit)}</td><td>${money(r.displayedCredit)}</td>
-        <td>${percent(r.grossROC)}</td><td>${percent(r.rocAfterCommissionAndFees)}</td><td>${percent(r.monthlyChainIV)}</td>
-        <td>${whole(r.openInterest)}</td><td>${whole(r.shortPutOI)}</td><td>${whole(r.shortCallOI)}</td><td>${money(r.spreadMax)}</td>
-        <td>${r.expectedMove === null || r.expectedMove === undefined ? '—' : '±' + money(r.expectedMove)}</td><td class="${emClass}">${esc(r.expectedMoveStatus)}</td><td>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</td>
-        <td class="${strikeClass}">${esc(r.strikeValidationStatus)}<div class="recovered-source-note">${esc(r.strikeValidationReason)}</div></td>
-        <td>${esc(r.reviewStatus)}<div class="recovered-source-note">Educational review only; not a recommendation.</div></td>
-      </tr>`;
+      return `<tr data-index="${i}"><td><button class="sandbox-review-btn" type="button">Review</button></td><td><strong>${esc(r.symbol)}</strong></td><td>${esc(isoDate(r.expiry))}</td><td>${esc(r.dte)}</td><td>${money(r.spot)}</td><td>${esc(r.shortPut)}</td><td>${esc(r.longPut)}</td><td>${esc(r.shortCall)}</td><td>${esc(r.longCall)}</td><td>${money(r.requestedWidth)}</td><td>${percent(r.anchorPutOTM)}</td><td>${percent(r.anchorCallOTM)}</td><td>${percent(r.lowerAnchorPOTM)}</td><td>${money(r.naturalCredit)}</td><td>${money(r.midpointCredit)}</td><td>${money(r.displayedCredit)}</td><td>${percent(r.grossROC)}</td><td>${percent(r.rocAfterCommissionAndFees)}</td><td>${percent(r.monthlyChainIV)}</td><td>${whole(r.openInterest)}</td><td>${whole(r.shortPutOI)}</td><td>${whole(r.shortCallOI)}</td><td>${money(r.spreadMax)}</td><td>${r.expectedMove === null || r.expectedMove === undefined ? '—' : '±' + money(r.expectedMove)}</td><td class="${emClass}">${esc(r.expectedMoveStatus)}</td><td>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</td><td class="${strikeClass}">${esc(r.strikeValidationStatus)}<div class="recovered-source-note">${esc(r.strikeValidationReason)}</div></td><td>${esc(r.reviewStatus)}<div class="recovered-source-note">Educational review only; not a recommendation.</div></td></tr>`;
     }).join('');
     body.querySelectorAll('tr[data-index]').forEach(tr => tr.addEventListener('click', () => selectRow(Number(tr.dataset.index))));
     selectRow(0);
   }
 
+  function candidateTicketTarget() {
+    if (byId('liveCandidateTicketContent')) return byId('liveCandidateTicketContent');
+    const headings = Array.from(document.querySelectorAll('h1,h2,h3'));
+    const heading = headings.find(h => /candidate ticket/i.test(h.textContent || ''));
+    if (!heading) return null;
+    const panel = heading.closest('.panel') || heading.parentElement;
+    if (!panel) return null;
+    const oldNote = Array.from(panel.querySelectorAll('.note')).find(n => /run a scan/i.test(n.textContent || ''));
+    if (oldNote) oldNote.remove();
+    const target = document.createElement('div');
+    target.id = 'liveCandidateTicketContent';
+    target.className = 'ticket-live-grid';
+    heading.insertAdjacentElement('afterend', target);
+    return target;
+  }
+
+  function clearTicket() {
+    const html = '<div class="ticket-live-item warn"><span>Status</span><strong>Run a scan, then select a candidate.</strong></div>';
+    const target = candidateTicketTarget();
+    if (target) target.innerHTML = html;
+    const recovered = byId('recoveredTicketContent');
+    if (recovered) recovered.innerHTML = '<div class="recovered-ticket-item"><span>Status</span><strong>Run a scan, then select a candidate.</strong></div>';
+  }
+
+  function ticketHtml(r) {
+    const status = r.strikeValidationStatus === 'PASS' ? 'Candidate loaded' : r.strikeValidationStatus;
+    return `
+      <div class="ticket-live-item"><span>Symbol</span><strong>${esc(r.symbol)}</strong></div>
+      <div class="ticket-live-item"><span>Expiration / DTE</span><strong>${esc(isoDate(r.expiry))} · ${esc(r.dte)} DTE</strong></div>
+      <div class="ticket-live-item"><span>Spot</span><strong>${money(r.spot)}</strong></div>
+      <div class="ticket-live-item warn"><span>Status</span><strong>${esc(status)}</strong></div>
+      <div class="ticket-live-item sell"><span>Sell Put</span><strong>${esc(r.shortPut)}</strong></div>
+      <div class="ticket-live-item buy"><span>Buy Put</span><strong>${esc(r.longPut)}</strong></div>
+      <div class="ticket-live-item sell"><span>Sell Call</span><strong>${esc(r.shortCall)}</strong></div>
+      <div class="ticket-live-item buy"><span>Buy Call</span><strong>${esc(r.longCall)}</strong></div>
+      <div class="ticket-live-item"><span>Width</span><strong>${money(r.requestedWidth)}</strong></div>
+      <div class="ticket-live-item"><span>Displayed Credit</span><strong>${money(r.displayedCredit)}</strong></div>
+      <div class="ticket-live-item"><span>ROC After Costs</span><strong>${percent(r.rocAfterCommissionAndFees)}</strong></div>
+      <div class="ticket-live-item"><span>Lower Anchor P(OTM)</span><strong>${percent(r.lowerAnchorPOTM)}</strong></div>
+      <div class="ticket-live-item"><span>Put Anchor P(OTM)</span><strong>${percent(r.anchorPutOTM)}</strong></div>
+      <div class="ticket-live-item"><span>Call Anchor P(OTM)</span><strong>${percent(r.anchorCallOTM)}</strong></div>
+      <div class="ticket-live-item"><span>Monthly OI</span><strong>${whole(r.openInterest)}</strong></div>
+      <div class="ticket-live-item"><span>Max B/A Spread</span><strong>${money(r.spreadMax)}</strong></div>
+      <div class="ticket-live-item"><span>Expected Move</span><strong>${r.expectedMove == null ? '—' : '±' + money(r.expectedMove)}</strong></div>
+      <div class="ticket-live-item"><span>EM Status</span><strong>${esc(r.expectedMoveStatus)}</strong></div>
+      <div class="ticket-live-item"><span>Earnings</span><strong>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</strong></div>
+      <div class="ticket-live-item"><span>Review</span><strong>${esc(r.reviewStatus)}</strong></div>`;
+  }
+
   function selectRow(index) {
     const r = shownRows[index];
-    if (!r || !byId('recoveredTicketContent')) return;
+    if (!r) return;
     const body = byId('resultsBody');
-    body.querySelectorAll('tr').forEach(tr => tr.classList.remove('row-active'));
-    const active = body.querySelector(`tr[data-index="${index}"]`);
-    if (active) active.classList.add('row-active');
-    const fields = [
-      ['Short Put', r.shortPut], ['Long Put', r.longPut], ['Short Call', r.shortCall], ['Long Call', r.longCall],
-      ['Width', money(r.requestedWidth)], ['Strike Validation', r.strikeValidationStatus + ' — ' + r.strikeValidationReason],
-      ['Displayed Credit', money(r.displayedCredit)], ['ROC After Costs', percent(r.rocAfterCommissionAndFees)],
-      ['Anchor P(OTM)', percent(r.anchorPutOTM)], ['Anchor C(OTM)', percent(r.anchorCallOTM)], ['Lower Anchor P(OTM)', percent(r.lowerAnchorPOTM)],
-      ['Data Source', pick(r.dataSource, 'Schwab/TOS Market Data API')]
-    ];
-    byId('recoveredTicketContent').innerHTML = fields.map(([label,value]) => `<div class="recovered-ticket-item"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+    if (body) {
+      body.querySelectorAll('tr').forEach(tr => tr.classList.remove('row-active'));
+      const active = body.querySelector(`tr[data-index="${index}"]`);
+      if (active) active.classList.add('row-active');
+    }
+    const html = ticketHtml(r);
+    const target = candidateTicketTarget();
+    if (target) target.innerHTML = html;
+    const recovered = byId('recoveredTicketContent');
+    if (recovered) recovered.innerHTML = html.replaceAll('ticket-live-item', 'recovered-ticket-item');
   }
 
   async function load(more) {
@@ -254,26 +283,26 @@
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const data = await response.json();
       rows = (Array.isArray(data.results) ? data.results : Array.isArray(data.rows) ? data.rows : []).map(normalize);
-
       if (byId('truthDataMode')) byId('truthDataMode').textContent = pick(data.dataMode, data.scanMode, 'Schwab/TOS market data');
       if (byId('truthBuild')) byId('truthBuild').textContent = data.building ? 'Building' : 'Ready';
       if (byId('truthUniverse')) byId('truthUniverse').textContent = whole(pick(data.universeCount, data.total, rows.length));
       if (byId('truthLastScan')) byId('truthLastScan').textContent = pick(data.generatedAt, 'Available');
       if (byId('scanStamp')) byId('scanStamp').textContent = data.generatedAt ? 'Scanned ' + new Date(data.generatedAt).toLocaleString() : 'Live data';
       if (byId('universeCount')) byId('universeCount').textContent = whole(pick(data.universeCount, rows.length));
-
       render();
     } catch (error) {
       rows = [];
       const body = byId('resultsBody');
       if (status) status.textContent = 'Live candidate load failed';
       if (body) body.innerHTML = `<tr><td colspan="28" class="empty">Unable to load live candidates from Netlify/Supabase: ${esc(error.message)}</td></tr>`;
+      clearTicket();
     }
   }
 
   function init() {
     addStyles();
     setupRecoveredUI();
+    clearTicket();
     load(false);
   }
 
