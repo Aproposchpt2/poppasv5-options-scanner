@@ -1,4 +1,4 @@
-// POPPA'S Scanner Table Sandbox — stable live controller with premium graph and visible scan status.
+// POPPA'S Scanner Table Sandbox — stable live controller with premium graph, manual scan, and public-safe messaging.
 (function () {
   'use strict';
 
@@ -40,7 +40,7 @@
       #runScanBtn{background:#fff!important;color:#04101f!important}
       #rescanBtn{border:1px solid var(--line2)!important;background:rgba(255,255,255,.055)!important;color:#fff!important}
       #poppasLiveStatus{display:block;margin:14px 0 0;border-left:4px solid var(--cyan);border-radius:0 12px 12px 0;padding:14px 16px;background:rgba(30,167,255,.10);color:#eaf3ff;font-weight:800;letter-spacing:.02em;min-height:52px}
-      #poppasLiveStatus strong{color:#fff}.table-wrap table{min-width:4200px}.table-wrap th{cursor:pointer}.table-wrap td{white-space:nowrap}.table-wrap td:last-child{white-space:normal;min-width:240px}
+      #poppasLiveStatus strong{color:#fff}.table-wrap{display:block!important;visibility:visible!important}.table-wrap table{min-width:4200px}.table-wrap th{cursor:pointer}.table-wrap td{white-space:nowrap}.table-wrap td:last-child{white-space:normal;min-width:240px}
       .strike-pass{color:var(--green);font-weight:900}.strike-rejected{color:var(--red);font-weight:900}.recovered-source-note{font-size:.78rem;color:var(--muted);margin-top:5px;white-space:normal;min-width:170px}
       .ticket-live-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:14px;margin-top:14px}.ticket-math-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:14px;margin-top:14px}
       .ticket-live-item{border:1px solid rgba(191,214,255,.26);border-radius:15px;padding:15px 16px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));min-height:88px}.ticket-live-item span{display:block;color:var(--cyan);font-size:.7rem;line-height:1.1;letter-spacing:.12em;text-transform:uppercase;font-weight:900}.ticket-live-item strong{display:block;color:#fff;font-size:1.2rem;margin-top:7px;line-height:1.1}.ticket-live-item.small strong{font-size:1.04rem}.ticket-live-item.anchor strong{color:var(--red)}.ticket-live-item.offset strong{color:var(--green)}.ticket-card-note{border-left:4px solid var(--cyan);background:rgba(30,167,255,.1);padding:14px 16px;border-radius:0 12px 12px 0;margin:14px 0 4px;color:#eaf3ff;font-weight:700}.ticket-card-title{font-family:var(--disp);font-size:2rem;line-height:1.05;color:#fff;margin:2px 0 8px}
@@ -68,7 +68,6 @@
     if (!host) return null;
     el = document.createElement('div');
     el.id = 'poppasLiveStatus';
-    el.innerHTML = 'Ready. Click <strong>Scan Now</strong> to load live candidates.';
     host.insertAdjacentElement('afterend', el);
     return el;
   }
@@ -96,10 +95,11 @@
   }
 
   function cleanupContent() {
-    const hideText = ['Wider sortable table · Short OI column removed', 'Preview-page source-of-truth test', 'No backend filtering: Run Scanner Now calls'];
+    const hideText = ['Wider sortable table · Short OI column removed', 'Preview-page source-of-truth test', 'No backend filtering: Run Scanner Now calls', 'Supabase', 'Netlify', 'Postgres', 'REST'];
     Array.from(document.querySelectorAll('h1,h2,h3,p,div,details,summary')).forEach(el => {
       const txt = (el.textContent || '').trim();
       if (hideText.some(t => txt.includes(t))) {
+        if (el.id === 'poppasLiveStatus') return;
         const container = el.closest('details') || el.closest('.card') || el.closest('.panel') || el;
         container.style.display = 'none';
       }
@@ -109,7 +109,7 @@
       const box = document.createElement('div');
       box.id = 'poppasFaqReplacement';
       box.className = 'panel';
-      box.innerHTML = '<p class="eyebrow">FAQ</p><h2 class="title">Scanner questions</h2><div class="cards5"><div class="card"><h3>Where is the scanner data sourced from?</h3><p>Market data is sourced through the Schwab / thinkorswim® market-data pipeline, then processed through POPPA\'S Strategy OS for educational Iron Condor candidate analysis.</p></div><div class="card"><h3>What does Scan For More Records do?</h3><p>It expands the visible candidate set for additional educational review.</p></div><div class="card"><h3>Are these trade recommendations?</h3><p>No. Rows are educational candidates only. Pricing, liquidity, expiration, earnings, and risk must be verified independently.</p></div><div class="card"><h3>What is ROC After Cost?</h3><p>It estimates return after standard commission and fee assumptions are included.</p></div><div class="card"><h3>What does Anchor P(OTM) mean?</h3><p>It is an anchor-leg probability metric, not a guaranteed whole-condor probability.</p></div></div>';
+      box.innerHTML = '<p class="eyebrow">FAQ</p><h2 class="title">Scanner questions</h2><div class="cards5"><div class="card"><h3>Where is the scanner data sourced from?</h3><p>Market data is sourced from professional market-data feeds and processed through POPPA\'S Strategy OS for educational Iron Condor candidate analysis.</p></div><div class="card"><h3>What does Scan For More Records do?</h3><p>It expands the visible candidate set for additional educational review.</p></div><div class="card"><h3>Are these trade recommendations?</h3><p>No. Rows are educational candidates only. Pricing, liquidity, expiration, earnings, and risk must be verified independently.</p></div><div class="card"><h3>What is ROC After Cost?</h3><p>It estimates return after standard commission and fee assumptions are included.</p></div><div class="card"><h3>What does Anchor P(OTM) mean?</h3><p>It is an anchor-leg probability metric, not a guaranteed whole-condor probability.</p></div></div>';
       faq.appendChild(box);
     }
     Array.from(document.querySelectorAll('.foot,footer')).forEach(f => {
@@ -141,7 +141,12 @@
     $('recoveredScanNowBtn').addEventListener('click', () => load(false));
     $('recoveredScanMoreBtn').addEventListener('click', () => load(true));
     table.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => { const key = th.dataset.sort; if (key === 'review') return; if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = ['symbol','expiry','strikeValidationStatus','reviewStatus'].includes(key) ? 1 : -1; } render(); }));
-    ['rocMin','rocMax','minProb','ivMin','minOI','minShortOI','maxSpread','spreadWidth','dteWindow','maxResults'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', render); });
+    ['rocMin','rocMax','minProb','ivMin','minOI','minShortOI','maxSpread','spreadWidth','dteWindow','maxResults'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', markSettingsChanged); });
+    body.innerHTML = '<tr><td colspan="28" class="empty">Adjust settings, then click Scan Now to load candidates.</td></tr>';
+  }
+
+  function markSettingsChanged() {
+    setStatus('Scanner settings changed. Click <strong>Scan Now</strong> to refresh your results.', 'warn');
   }
 
   function lowerAsPercent(r) { const v = num(r.lowerAnchorPOTM, 0); return Math.abs(v) <= 1 ? v * 100 : v; }
@@ -183,14 +188,14 @@
     if ($('scanMode')) $('scanMode').textContent = includeMoreRecords ? 'Expanded records' : 'Live candidates';
     const pill = $('recoveredStatus');
     if (pill) pill.textContent = `${shownRows.length.toLocaleString()} displayed · ${rows.length.toLocaleString()} loaded`;
-    if (!shownRows.length) { body.innerHTML = '<tr><td colspan="28" class="empty">No live candidates match the current controls.</td></tr>'; clearTicket(); clearGraph(); setStatus('<strong>Scan complete:</strong> live records loaded, but none match the current display controls.', 'warn'); return; }
+    if (!shownRows.length) { body.innerHTML = '<tr><td colspan="28" class="empty">No live candidates match the current controls.</td></tr>'; clearTicket(); clearGraph(); setStatus('<strong>Scan complete:</strong> market candidates were checked, but none match the current display controls.', 'warn'); return; }
     body.innerHTML = shownRows.map((r,i) => {
       const em = String(r.expectedMoveStatus || '').toLowerCase();
       const emClass = em.includes('outside') ? 'em-out' : em.includes('inside') ? 'em-in' : em.includes('near') ? 'em-near' : 'warn';
       return `<tr data-index="${i}"><td><button class="sandbox-review-btn" type="button">Review</button></td><td><strong>${esc(r.symbol)}</strong></td><td>${esc(isoDate(r.expiry))}</td><td>${esc(r.dte)}</td><td>${money(r.spot)}</td><td>${esc(r.shortPut)}</td><td>${esc(r.longPut)}</td><td>${esc(r.shortCall)}</td><td>${esc(r.longCall)}</td><td>${money(r.requestedWidth)}</td><td>${percent(r.anchorPutOTM)}</td><td>${percent(r.anchorCallOTM)}</td><td>${percent(r.lowerAnchorPOTM)}</td><td>${money(r.naturalCredit)}</td><td>${money(r.midpointCredit)}</td><td>${money(r.displayedCredit)}</td><td>${percent(r.grossROC)}</td><td>${percent(r.rocAfterCommissionAndFees)}</td><td>${percent(r.monthlyChainIV)}</td><td>${whole(r.openInterest)}</td><td>${whole(r.shortPutOI)}</td><td>${whole(r.shortCallOI)}</td><td>${money(r.spreadMax)}</td><td>${r.expectedMove == null ? '—' : '±' + money(r.expectedMove)}</td><td class="${emClass}">${esc(r.expectedMoveStatus)}</td><td>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</td><td class="strike-pass">${esc(r.strikeValidationStatus)}<div class="recovered-source-note">${esc(r.strikeValidationReason)}</div></td><td>${esc(r.reviewStatus)}<div class="recovered-source-note">Educational review only; not a recommendation.</div></td></tr>`;
     }).join('');
     body.querySelectorAll('tr[data-index]').forEach(tr => tr.addEventListener('click', () => selectRow(Number(tr.dataset.index))));
-    setStatus(`<strong>Scan complete:</strong> ${shownRows.length.toLocaleString()} candidates displayed from ${rows.length.toLocaleString()} live records. Select a row to update the ticket and graph.`, 'success');
+    setStatus(`<strong>Scan complete:</strong> ${shownRows.length.toLocaleString()} candidates displayed from ${rows.length.toLocaleString()} market records. Select a row to update the ticket and graph.`, 'success');
     selectRow(0);
   }
 
@@ -217,8 +222,8 @@
     panel.insertAdjacentElement('afterend', graph);
     return graph;
   }
-  function clearTicket() { const target = candidateTicketTarget(); if (target) target.innerHTML = '<p class="eyebrow">Order Ticket Preview</p><div class="ticket-card-title">Candidate Review</div><div class="ticket-card-note">Run a scan, then select a candidate.</div>'; }
-  function clearGraph() { const target = graphTarget(); if (target) target.innerHTML = '<div class="premium-graph-panel"><p class="eyebrow">Strike Graph</p><div class="premium-graph-title">Condor strike map</div><div class="premium-graph-sub">Run a scan, then select a candidate to visualize the defined-risk structure.</div></div>'; }
+  function clearTicket() { const target = candidateTicketTarget(); if (target) target.innerHTML = '<p class="eyebrow">Order Ticket Preview</p><div class="ticket-card-title">Candidate Review</div><div class="ticket-card-note">Click Scan Now, then select a candidate.</div>'; }
+  function clearGraph() { const target = graphTarget(); if (target) target.innerHTML = '<div class="premium-graph-panel"><p class="eyebrow">Strike Graph</p><div class="premium-graph-title">Condor strike map</div><div class="premium-graph-sub">Click Scan Now, then select a candidate to visualize the defined-risk structure.</div></div>'; }
   function ticketHtml(r) { return `<p class="eyebrow">Order Ticket Preview</p><div class="ticket-card-title">${esc(r.symbol)} Candidate Review</div><div class="ticket-card-note">Educational review only; verify pricing, liquidity, earnings, and risk independently.</div><div class="ticket-live-grid"><div class="ticket-live-item anchor"><span>Short Put</span><strong>${esc(r.shortPut)}</strong></div><div class="ticket-live-item offset"><span>Long Put</span><strong>${esc(r.longPut)}</strong></div><div class="ticket-live-item anchor"><span>Short Call</span><strong>${esc(r.shortCall)}</strong></div><div class="ticket-live-item offset"><span>Long Call</span><strong>${esc(r.longCall)}</strong></div></div><div class="ticket-math-grid"><div class="ticket-live-item small"><span>Credit</span><strong>${money(r.displayedCredit)}</strong></div><div class="ticket-live-item small"><span>Max Risk</span><strong>${money(r.maxRiskAfterCosts)}</strong></div><div class="ticket-live-item small"><span>ROC</span><strong>${percent(r.grossROC)}</strong></div><div class="ticket-live-item small"><span>ROC After Cost</span><strong>${percent(r.rocAfterCommissionAndFees)}</strong></div><div class="ticket-live-item small"><span>Lower Anchor P(OTM)</span><strong>${percent(r.lowerAnchorPOTM)}</strong></div><div class="ticket-live-item small anchor"><span>Put Anchor P(OTM)</span><strong>${percent(r.anchorPutOTM)}</strong></div><div class="ticket-live-item small anchor"><span>Call Anchor P(OTM)</span><strong>${percent(r.anchorCallOTM)}</strong></div><div class="ticket-live-item small"><span>DTE</span><strong>${esc(r.dte)}</strong></div><div class="ticket-live-item small"><span>Spot</span><strong>${money(r.spot)}</strong></div><div class="ticket-live-item small"><span>EM Status</span><strong>${esc(r.expectedMoveStatus)}</strong></div></div>`; }
 
   function updateGraph(r) {
@@ -231,9 +236,7 @@
     const pos = v => Math.max(5, Math.min(95, 5 + ((num(v, min) - min) / (max - min)) * 90));
     const putLeft = pos(r.longPut), putShort = pos(r.shortPut), callShort = pos(r.shortCall), callRight = pos(r.longCall);
     const emLeft = spot !== null ? pos(spot - move) : 0, emRight = spot !== null ? pos(spot + move) : 0;
-    const markers = [
-      ['LP', r.longPut, 'long', 'high'], ['SP', r.shortPut, 'short', 'low'], ['Spot', r.spot, 'spot', 'high'], ['SC', r.shortCall, 'short', 'low'], ['LC', r.longCall, 'long', 'high']
-    ].map(([label, value, cls, level]) => `<div class="premium-marker ${cls} ${level}" style="left:${pos(value)}%"><label>${label} ${money(value)}</label></div>`).join('');
+    const markers = [['LP', r.longPut, 'long', 'high'], ['SP', r.shortPut, 'short', 'low'], ['Spot', r.spot, 'spot', 'high'], ['SC', r.shortCall, 'short', 'low'], ['LC', r.longCall, 'long', 'high']].map(([label, value, cls, level]) => `<div class="premium-marker ${cls} ${level}" style="left:${pos(value)}%"><label>${label} ${money(value)}</label></div>`).join('');
     target.innerHTML = `<div class="premium-graph-panel"><p class="eyebrow">Strike Graph</p><div class="premium-graph-title">${esc(r.symbol)} defined-risk corridor</div><div class="premium-graph-sub">Premium strike-map view showing long offsets, short anchors, spot, and expected-move range.</div><div class="premium-graph"><div class="premium-axis"></div><div class="premium-profit" style="left:${putShort}%;width:${Math.max(1, callShort-putShort)}%"></div><div class="premium-profit" style="left:${Math.min(putLeft,putShort)}%;width:${Math.max(1, Math.abs(putShort-putLeft))}%;opacity:.35"></div><div class="premium-profit" style="left:${Math.min(callShort,callRight)}%;width:${Math.max(1, Math.abs(callRight-callShort))}%;opacity:.35"></div>${move > 0 && spot !== null ? `<div class="premium-em" style="left:${Math.min(emLeft, emRight)}%;width:${Math.max(1, Math.abs(emRight-emLeft))}%"></div>` : ''}${markers}<div class="premium-scale"><span>${money(min)}</span><span>${money(max)}</span></div></div><div class="premium-graph-meta"><div><span>Put Wing</span><strong>${esc(r.longPut)} / ${esc(r.shortPut)}</strong></div><div><span>Call Wing</span><strong>${esc(r.shortCall)} / ${esc(r.longCall)}</strong></div><div><span>Expected Move</span><strong>${move > 0 ? '±' + money(move) : '—'}</strong></div><div><span>EM Status</span><strong>${esc(r.expectedMoveStatus)}</strong></div></div><div class="premium-graph-note"><b>Red markers:</b> anchor short strikes. <b>Green markers:</b> offset long strikes. Educational visualization only.</div></div>`;
   }
 
@@ -241,15 +244,15 @@
 
   async function load(more) {
     includeMoreRecords = Boolean(more);
-    setStatus(more ? '<strong>Scanning:</strong> loading additional live records from Supabase…' : '<strong>Scanning:</strong> loading live candidates from Supabase…', 'info');
+    setStatus(more ? '<strong>Scanning:</strong> searching for additional qualifying market candidates…' : '<strong>Scanning:</strong> searching for qualifying Iron Condor candidates…', 'info');
     try {
       const url = RESULTS_ENDPOINT + (includeMoreRecords ? '?includeRejected=true&passersTop=true' : '?passersTop=true');
       const response = await fetch(url, { cache: 'no-store', headers: { accept: 'application/json' } });
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const data = await response.json();
       rows = (Array.isArray(data.results) ? data.results : Array.isArray(data.rows) ? data.rows : []).map(normalize);
-      if ($('truthDataMode')) $('truthDataMode').textContent = pick(data.dataMode, data.scanMode, 'Schwab/TOS market data');
-      if ($('truthBuild')) $('truthBuild').textContent = data.building ? 'Building' : 'Ready';
+      if ($('truthDataMode')) $('truthDataMode').textContent = 'Live market candidates';
+      if ($('truthBuild')) $('truthBuild').textContent = 'Ready';
       if ($('truthUniverse')) $('truthUniverse').textContent = whole(pick(data.universeCount, data.total, rows.length));
       if ($('truthLastScan')) $('truthLastScan').textContent = pick(data.generatedAt, 'Available');
       if ($('scanStamp')) $('scanStamp').textContent = data.generatedAt ? 'Scanned ' + new Date(data.generatedAt).toLocaleString() : 'Live data';
@@ -258,12 +261,22 @@
     } catch (error) {
       rows = [];
       const body = $('resultsBody');
-      if (body) body.innerHTML = `<tr><td colspan="28" class="empty">Unable to load live candidates from Netlify/Supabase: ${esc(error.message)}</td></tr>`;
-      setStatus(`<strong>Live scan failed:</strong> ${esc(error.message)}`, 'error');
+      if (body) body.innerHTML = `<tr><td colspan="28" class="empty">Unable to load market candidates: ${esc(error.message)}</td></tr>`;
+      setStatus(`<strong>Scan unavailable:</strong> ${esc(error.message)}`, 'error');
       clearTicket(); clearGraph();
     }
   }
 
-  function init() { addStyles(); cleanupContent(); setupButtons(); setupTable(); clearTicket(); clearGraph(); setStatus('Ready. Click <strong>Scan Now</strong> to load live candidates.', 'info'); load(false); setTimeout(() => { cleanupContent(); setupButtons(); }, 500); setTimeout(() => { cleanupContent(); setupButtons(); }, 1500); }
+  function init() {
+    addStyles();
+    cleanupContent();
+    setupButtons();
+    setupTable();
+    clearTicket();
+    clearGraph();
+    setStatus('Ready. Adjust settings if needed, then click <strong>Scan Now</strong>.', 'info');
+    setTimeout(() => { cleanupContent(); setupButtons(); }, 500);
+    setTimeout(() => { cleanupContent(); setupButtons(); }, 1500);
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
