@@ -24,6 +24,15 @@ const num = (v, d = null) => {
 };
 
 const round = (v, p = 4) => Number.isFinite(Number(v)) ? +Number(v).toFixed(p) : null;
+const envGet = name => {
+  try {
+    if (globalThis.Netlify && Netlify.env && typeof Netlify.env.get === 'function') {
+      const v = Netlify.env.get(name);
+      if (v) return v;
+    }
+  } catch (_) {}
+  return process.env[name];
+};
 
 function normalizeCandidate(r) {
   const source = r.source_payload || {};
@@ -32,10 +41,10 @@ function normalizeCandidate(r) {
   const naturalCredit = num(r.natural_credit ?? r.credit);
   const midpointCredit = num(r.midpoint_credit ?? r.mid_credit ?? r.displayed_credit ?? r.credit);
   const displayedCredit = num(r.displayed_credit ?? midpointCredit);
-  const grossCreditDollars = num(r.gross_credit_dollars, displayedCredit !== null ? round(displayedCredit * 100, 2) : null);
-  const netCreditAfterCosts = num(r.net_credit_after_costs, grossCreditDollars !== null ? round(grossCreditDollars - TOTAL_TRADING_COST_DOLLARS, 2) : null);
-  const grossMaxRisk = num(r.gross_max_risk, requestedWidth !== null && grossCreditDollars !== null ? round(requestedWidth * 100 - grossCreditDollars, 2) : null);
-  const netMaxRiskAfterCosts = num(r.net_max_risk_after_costs, requestedWidth !== null && netCreditAfterCosts !== null ? round(requestedWidth * 100 - netCreditAfterCosts, 2) : null);
+  const grossCreditDollars = displayedCredit !== null ? round(displayedCredit * 100, 2) : null;
+  const netCreditAfterCosts = grossCreditDollars !== null ? round(grossCreditDollars - TOTAL_TRADING_COST_DOLLARS, 2) : null;
+  const grossMaxRisk = requestedWidth !== null && grossCreditDollars !== null ? round(requestedWidth * 100 - grossCreditDollars, 2) : null;
+  const netMaxRiskAfterCosts = requestedWidth !== null && netCreditAfterCosts !== null ? round(requestedWidth * 100 - netCreditAfterCosts, 2) : null;
   const grossROC = num(r.gross_roc ?? r.roc, grossCreditDollars !== null && grossMaxRisk > 0 ? round(grossCreditDollars / grossMaxRisk * 100, 2) : null);
   const rocAfterCommissionAndFees = num(r.roc_after_commission_and_fees, netCreditAfterCosts !== null && netMaxRiskAfterCosts > 0 ? round(netCreditAfterCosts / netMaxRiskAfterCosts * 100, 2) : null);
   const anchorPutOTM = num(r.anchor_put_otm ?? r.put_prob_otm);
@@ -135,10 +144,14 @@ function normalizeCandidate(r) {
 }
 
 async function supabaseFetch(path) {
-  const url = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error('Missing Supabase environment variables');
-  const res = await fetch(`${url}/rest/v1/${path}`, {
+  const rawUrl = envGet('SUPABASE_URL') || '';
+  const url = rawUrl.replace(/\/$/, '');
+  const key = envGet('SUPABASE_SERVICE_ROLE_KEY') || envGet('SUPABASE_SERVICE_KEY') || envGet('SUPABASE_ANON_KEY');
+  if (!url || !key) {
+    throw new Error(`Missing Supabase environment variables. SUPABASE_URL=${url ? 'present' : 'missing'} SERVICE_ROLE=${envGet('SUPABASE_SERVICE_ROLE_KEY') ? 'present' : 'missing'} ANON=${envGet('SUPABASE_ANON_KEY') ? 'present' : 'missing'}`);
+  }
+  const fullUrl = `${url}/rest/v1/${path}`;
+  const res = await fetch(fullUrl, {
     headers: {
       apikey: key,
       Authorization: `Bearer ${key}`,
@@ -147,7 +160,7 @@ async function supabaseFetch(path) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Supabase REST ${res.status}: ${text.slice(0, 180)}`);
+    throw new Error(`Supabase REST ${res.status}: ${text.slice(0, 500)}`);
   }
   return res.json();
 }
@@ -217,6 +230,7 @@ export default async (req) => {
       results
     }, 200, 0);
   } catch (error) {
+    console.error('[scan-results] Supabase candidate load failed:', error && error.message ? error.message : error);
     return json({
       error: true,
       message: error.message,
