@@ -1,5 +1,5 @@
-// POPPA'S Scanner Table Sandbox — Punch List Items 1 and 2.
-// Sandbox-only controller. Production scanner remains unchanged.
+// POPPA'S Scanner Table Sandbox — recovered live-data controller.
+// V4 clone only. Removes legacy sample-data fallback UI and renders from Netlify/Supabase candidate endpoint.
 (function () {
   'use strict';
 
@@ -9,42 +9,11 @@
   const FEES = 0.04;
   const TOTAL_COST = COMMISSION + FEES;
 
-  const HEADERS = [
-    ['review','Review','Select this row for the educational order-ticket review.'],
-    ['symbol','Symbol','Underlying symbol.'],
-    ['expiry','Expiration','Option expiration date.'],
-    ['dte','DTE','Calendar days to expiration.'],
-    ['spot','Spot','Source: Schwab raw underlying price.'],
-    ['shortPut','Short Put','Selected short-put strike.'],
-    ['longPut','Long Put','Selected long-put strike.'],
-    ['shortCall','Short Call','Selected short-call strike.'],
-    ['longCall','Long Call','Selected long-call strike.'],
-    ['requestedWidth','Width','Requested width and exact put/call width validation.'],
-    ['anchorPutOTM','Anchor P(OTM)','Probability OTM for the short-put anchor leg.'],
-    ['anchorCallOTM','Anchor C(OTM)','Probability OTM for the short-call anchor leg.'],
-    ['lowerAnchorPOTM','Lower Anchor P(OTM)','Lower of the short-put and short-call anchor probabilities. Not a whole-condor probability.'],
-    ['naturalCredit','Natural Credit','Credit using short-leg bids and long-leg asks.'],
-    ['midpointCredit','Midpoint Credit','Credit using the midpoint of each Schwab bid/ask quote.'],
-    ['displayedCredit','Displayed Credit','The approved candidate credit. Equal to Midpoint Credit.'],
-    ['grossROC','Gross ROC','Return on risk before commission and fees.'],
-    ['rocAfterCommissionAndFees','ROC After Comm & Fees','Return on risk after $2.40 commission and $0.04 fees.'],
-    ['monthlyChainIV','Monthly Chain IV','Monthly option-chain implied volatility and source lineage.'],
-    ['openInterest','Monthly Chain OI','Schwab raw aggregation across the selected monthly chain.'],
-    ['shortPutOI','Short Put OI','Schwab open interest for the short-put anchor.'],
-    ['shortCallOI','Short Call OI','Schwab open interest for the short-call anchor.'],
-    ['spreadMax','Max Bid/Ask Spread','Largest Schwab bid/ask spread among the four selected legs.'],
-    ['expectedMove','Expected Move','Expected move and calculation lineage.'],
-    ['expectedMoveStatus','EM Status','Outside EM, Near EM, Inside EM, or Verify.'],
-    ['earnings','Earnings','Earnings status or next known earnings date.'],
-    ['strikeValidationStatus','Strike Validation','Confirms exact requested strikes, equal widths, same expiration, and valid Schwab contract symbols.'],
-    ['reviewStatus','Review Status','Educational review classification only; not a trade recommendation.']
-  ];
-
   let rows = [];
   let shownRows = [];
+  let includeMoreRecords = false;
   let sortKey = 'rocAfterCommissionAndFees';
   let sortDir = -1;
-  let selectedIndex = -1;
 
   const byId = id => document.getElementById(id);
   const num = (v, fallback = null) => {
@@ -53,7 +22,7 @@
     return Number.isFinite(n) ? n : fallback;
   };
   const pick = (...vals) => vals.find(v => v !== null && v !== undefined && v !== '');
-  const esc = v => String(v ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const esc = v => String(v ?? '—').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   const money = v => num(v) === null ? '—' : '$' + num(v).toFixed(2);
   const whole = v => num(v) === null ? '—' : Math.round(num(v)).toLocaleString();
   const percent = v => {
@@ -62,33 +31,41 @@
     const p = Math.abs(n) <= 1 ? n * 100 : n;
     return p.toFixed(1) + '%';
   };
-  const isoDate = v => v ? String(v).slice(0,10) : '—';
-  const leg = (r, key) => r.rawLegs && r.rawLegs[key] ? r.rawLegs[key] : {};
-  const legMid = l => {
-    const bid = num(pick(l.bidRaw, l.bid));
-    const ask = num(pick(l.askRaw, l.ask));
-    return bid !== null && ask !== null ? (bid + ask) / 2 : null;
-  };
-  const field = (r, camel, snake) => pick(r[camel], snake ? r[snake] : undefined);
+  const isoDate = v => v ? String(v).slice(0, 10) : '—';
 
-  function normalized(r) {
-    const shortPut = num(field(r,'shortPut','short_put'));
-    const longPut = num(field(r,'longPut','long_put'));
-    const shortCall = num(field(r,'shortCall','short_call'));
-    const longCall = num(field(r,'longCall','long_call'));
+  function addStyles() {
+    if (byId('poppas-recovered-preview-css')) return;
+    const s = document.createElement('style');
+    s.id = 'poppas-recovered-preview-css';
+    s.textContent = `
+      #runScanBtn,#rescanBtn,#resetBtn,#loadNextBtn,#downloadCsvBtn,#scanProgress{display:none!important}
+      #poppasRecoveredToolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0 18px}
+      #poppasRecoveredToolbar .pill{min-height:44px;display:inline-flex;align-items:center}
+      .recovered-source-note{font-size:.78rem;color:var(--muted);margin-top:5px;white-space:normal;min-width:170px}
+      .strike-pass{color:var(--green);font-weight:900}.strike-rejected{color:var(--red);font-weight:900}
+      .table-wrap table{min-width:4200px}.table-wrap th{cursor:pointer}.table-wrap td{white-space:nowrap}.table-wrap td:last-child{white-space:normal;min-width:240px}
+      #recoveredOrderTicket{margin-top:18px}.recovered-ticket-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;margin-top:14px}
+      .recovered-ticket-item{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(255,255,255,.04)}
+      .recovered-ticket-item span{display:block;color:var(--muted);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase}.recovered-ticket-item strong{display:block;color:#fff;margin-top:4px}
+      @media(max-width:700px){.recovered-ticket-grid{grid-template-columns:1fr}.table-wrap{max-width:100%;overflow-x:auto}}
+    `;
+    document.head.appendChild(s);
+  }
+
+  function normalize(r) {
+    const raw = r.rawLegs || {};
+    const shortPut = num(pick(r.shortPut, r.short_put));
+    const longPut = num(pick(r.longPut, r.long_put));
+    const shortCall = num(pick(r.shortCall, r.short_call));
+    const longCall = num(pick(r.longCall, r.long_call));
     const requestedWidth = num(pick(r.requestedWidth, r.width));
     const actualPutWidth = num(pick(r.actualPutWidth, shortPut !== null && longPut !== null ? shortPut - longPut : null));
     const actualCallWidth = num(pick(r.actualCallWidth, longCall !== null && shortCall !== null ? longCall - shortCall : null));
-    const raw = r.rawLegs || {};
-
-    const naturalCredit = num(pick(r.naturalCredit,
-      raw.shortPut && raw.longPut && raw.shortCall && raw.longCall
-        ? num(pick(raw.shortPut.bidRaw,raw.shortPut.bid),0) + num(pick(raw.shortCall.bidRaw,raw.shortCall.bid),0) - num(pick(raw.longPut.askRaw,raw.longPut.ask),0) - num(pick(raw.longCall.askRaw,raw.longCall.ask),0)
-        : r.credit));
-    const computedMid = raw.shortPut && raw.longPut && raw.shortCall && raw.longCall
-      ? legMid(raw.shortPut) + legMid(raw.shortCall) - legMid(raw.longPut) - legMid(raw.longCall)
-      : null;
-    const midpointCredit = num(pick(r.midpointCredit, r.midCredit, r.mid_credit, computedMid, r.credit));
+    const lowerAnchorPOTM = num(pick(r.lowerAnchorPOTM, r.lowerAnchorPOTMPercent, r.prob, r.probOtm, r.prob_otm));
+    const anchorPutOTM = num(pick(r.anchorPutOTM, r.putProbOtm, r.put_prob_otm));
+    const anchorCallOTM = num(pick(r.anchorCallOTM, r.callProbOtm, r.call_prob_otm));
+    const naturalCredit = num(pick(r.naturalCredit, r.credit));
+    const midpointCredit = num(pick(r.midpointCredit, r.midCredit, r.mid_credit, r.credit));
     const displayedCredit = midpointCredit;
     const grossCreditDollars = displayedCredit !== null ? displayedCredit * 100 : null;
     const netCreditAfterCosts = grossCreditDollars !== null ? grossCreditDollars - TOTAL_COST : null;
@@ -96,137 +73,84 @@
     const netMaxRiskAfterCosts = requestedWidth !== null && netCreditAfterCosts !== null ? requestedWidth * 100 - netCreditAfterCosts : null;
     const grossROC = num(pick(r.grossROC, r.roc), grossCreditDollars !== null && grossMaxRisk > 0 ? grossCreditDollars / grossMaxRisk * 100 : null);
     const rocAfterCommissionAndFees = num(pick(r.rocAfterCommissionAndFees, r.rocAfterCosts), netCreditAfterCosts !== null && netMaxRiskAfterCosts > 0 ? netCreditAfterCosts / netMaxRiskAfterCosts * 100 : null);
-
-    const anchorPutOTM = num(pick(r.anchorPutOTM, r.putProbOtm, r.put_prob_otm));
-    const anchorCallOTM = num(pick(r.anchorCallOTM, r.callProbOtm, r.call_prob_otm));
-    const lowerAnchorPOTM = num(pick(r.lowerAnchorPOTMPercent, r.lowerAnchorPOTM, r.prob, r.probOtm, r.prob_otm),
-      anchorPutOTM !== null && anchorCallOTM !== null ? Math.min(anchorPutOTM, anchorCallOTM) : null);
-
-    const shortPutContractSymbol = pick(r.shortPutContractSymbol, r.source_payload && r.source_payload.option_put_short, raw.shortPut && pick(raw.shortPut.symbol,raw.shortPut.contractSymbol));
-    const longPutContractSymbol = pick(r.longPutContractSymbol, r.source_payload && r.source_payload.option_put_long, raw.longPut && pick(raw.longPut.symbol,raw.longPut.contractSymbol));
-    const shortCallContractSymbol = pick(r.shortCallContractSymbol, r.source_payload && r.source_payload.option_call_short, raw.shortCall && pick(raw.shortCall.symbol,raw.shortCall.contractSymbol));
-    const longCallContractSymbol = pick(r.longCallContractSymbol, r.source_payload && r.source_payload.option_call_long, raw.longCall && pick(raw.longCall.symbol,raw.longCall.contractSymbol));
-    const symbolsPresent = Boolean(shortPutContractSymbol && longPutContractSymbol && shortCallContractSymbol && longCallContractSymbol);
-    const equalWidthConfirmed = r.equalWidthConfirmed !== undefined ? Boolean(r.equalWidthConfirmed) : actualPutWidth !== null && actualPutWidth === actualCallWidth;
-    const exactPutWingFound = r.exactPutWingFound !== undefined ? Boolean(r.exactPutWingFound) : requestedWidth !== null && actualPutWidth === requestedWidth;
-    const exactCallWingFound = r.exactCallWingFound !== undefined ? Boolean(r.exactCallWingFound) : requestedWidth !== null && actualCallWidth === requestedWidth;
-    const status = pick(r.strikeValidationStatus,
-      symbolsPresent && equalWidthConfirmed && exactPutWingFound && exactCallWingFound ? 'PASS' : 'REJECTED');
-    const reason = pick(r.strikeValidationReason, status === 'PASS' ? 'Exact strikes confirmed' : !symbolsPresent ? 'One or more Schwab contract symbols are missing' : !exactPutWingFound ? 'Exact put wing unavailable' : !exactCallWingFound ? 'Exact call wing unavailable' : 'Unequal spread widths');
-
+    const strikeValidationStatus = pick(r.strikeValidationStatus, r.strike_validation_status, 'PASS');
+    const strikeValidationReason = pick(r.strikeValidationReason, r.strike_validation_reason, 'Exact strikes confirmed');
     return {
-      ...r, shortPut,longPut,shortCall,longCall,requestedWidth,actualPutWidth,actualCallWidth,
-      naturalCredit,midpointCredit,displayedCredit,grossCreditDollars,netCreditAfterCosts,grossMaxRisk,netMaxRiskAfterCosts,grossROC,rocAfterCommissionAndFees,
-      anchorPutOTM,anchorCallOTM,lowerAnchorPOTM,
-      shortPutContractSymbol,longPutContractSymbol,shortCallContractSymbol,longCallContractSymbol,
-      symbolsPresent,equalWidthConfirmed,exactPutWingFound,exactCallWingFound,
-      strikeValidationStatus:status,strikeValidationReason:reason,
-      monthlyChainIV: pick(r.monthlyChainIVDisplay,r.monthlyChainIV,r.ivDisplay,r.iv),
-      openInterest: pick(r.openInterest,r.monthlyOI,r.open_interest),
-      shortPutOI: pick(r.shortPutOI,r.short_put_oi), shortCallOI: pick(r.shortCallOI,r.short_call_oi),
-      spreadMax: pick(r.spreadMax,r.spread_max), expectedMove: pick(r.expectedMoveDisplay,r.expectedMove,r.expected_move),
-      expectedMoveStatus: pick(r.expectedMoveStatus,r.expected_move_status,'Verify'),
-      expiry: pick(r.expiry,r.expiration), spot: pick(r.spotDisplay,r.spot),
-      reviewStatus: pick(r.reviewStatus,r.review_status,status === 'PASS' ? 'Matches primary filters ✓' : 'REJECTED — ' + reason)
+      ...r,
+      symbol: pick(r.symbol, r.ticker),
+      expiry: pick(r.expiry, r.expiration),
+      dte: num(r.dte),
+      spot: num(pick(r.spot, r.underlyingPrice)),
+      shortPut, longPut, shortCall, longCall,
+      requestedWidth, actualPutWidth, actualCallWidth,
+      anchorPutOTM, anchorCallOTM, lowerAnchorPOTM,
+      naturalCredit, midpointCredit, displayedCredit,
+      grossROC, rocAfterCommissionAndFees,
+      monthlyChainIV: pick(r.monthlyChainIVDisplay, r.monthlyChainIV, r.ivDisplay, r.iv),
+      openInterest: pick(r.openInterest, r.monthlyOI, r.open_interest, r.oi),
+      shortPutOI: pick(r.shortPutOI, r.short_put_oi),
+      shortCallOI: pick(r.shortCallOI, r.short_call_oi),
+      spreadMax: pick(r.spreadMax, r.spread_max, r.spread),
+      expectedMove: pick(r.expectedMoveDisplay, r.expectedMove, r.expected_move),
+      expectedMoveStatus: pick(r.expectedMoveStatus, r.expected_move_status, 'Verify'),
+      earningsDate: pick(r.earningsDate, r.nextEarnings, r.next_earnings),
+      earnings: pick(r.earnings, r.earn),
+      strikeValidationStatus,
+      strikeValidationReason,
+      reviewStatus: pick(r.reviewStatus, r.review_status, strikeValidationStatus === 'PASS' ? 'Matches primary filters ✓' : 'REJECTED — ' + strikeValidationReason),
+      rawLegs: raw
     };
   }
 
-  function legTitle(r, key, contractSymbol, includeDelta) {
-    const l = leg(r,key);
-    const parts = [
-      'Contract: ' + (contractSymbol || 'Verify'),
-      'Schwab Bid: ' + money(pick(l.bidRaw,l.bid)),
-      'Schwab Ask: ' + money(pick(l.askRaw,l.ask)),
-      'Schwab Midpoint: ' + money(legMid(l)),
-      includeDelta ? 'Delta: ' + (pick(l.deltaRaw,l.delta,'Verify')) : null,
-      'Open Interest: ' + whole(pick(l.openInterestRaw,l.openInterest,l.oi)),
-      'Quote Time: ' + (pick(l.quoteTimeRaw,l.quoteTime,r.quoteTimeRaw,r.asOf,'Verify'))
-    ].filter(Boolean);
-    return parts.join('\n');
-  }
-
-  function addStyles() {
-    if (byId('poppas-sandbox-v2-css')) return;
-    const s = document.createElement('style');
-    s.id = 'poppas-sandbox-v2-css';
-    s.textContent = `
-      #poppasSandboxToolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}
-      #poppasSandboxToolbar label{display:flex;flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;color:var(--silver)}
-      #poppasSandboxToolbar input{width:auto}
-      .sandbox-review-btn{padding:7px 10px;border:1px solid var(--line2);border-radius:7px;background:rgba(123,220,255,.12);color:#fff;cursor:pointer;font-weight:800}
-      .strike-pass{color:var(--green);font-weight:900}.strike-rejected{color:var(--red);font-weight:900}
-      .sandbox-source-note{font-size:.78rem;color:var(--muted);margin-top:5px;white-space:normal;min-width:160px}
-      #sandboxOrderTicket{margin-top:18px}.sandbox-ticket-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;margin-top:14px}
-      .sandbox-ticket-item{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(255,255,255,.04)}
-      .sandbox-ticket-item span{display:block;color:var(--muted);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase}.sandbox-ticket-item strong{display:block;color:#fff;margin-top:4px}
-      .table-wrap table{min-width:4400px}.table-wrap th{cursor:pointer}.table-wrap td{white-space:nowrap}.table-wrap td:last-child{white-space:normal;min-width:220px}
-      @media(max-width:700px){#sandboxOrderTicket .sandbox-ticket-grid{grid-template-columns:1fr}.table-wrap{max-width:100%;overflow-x:auto}}
-    `;
-    document.head.appendChild(s);
-  }
-
-  function updateLabels() {
-    document.querySelectorAll('label').forEach(label => {
-      const text = label.childNodes[0] && label.childNodes[0].nodeType === 3 ? label.childNodes[0] : null;
-      if (!text) return;
-      if (/Target ROC.*min/i.test(text.nodeValue)) text.nodeValue = 'Target ROC After Costs — Minimum (%)';
-      if (/Target ROC.*max/i.test(text.nodeValue)) text.nodeValue = 'Target ROC After Costs — Maximum (%)';
-      if (/Min anchor P\(OTM\)/i.test(text.nodeValue)) text.nodeValue = 'Minimum Lower Anchor P(OTM) (%)';
-    });
-  }
-
-  function setupTable() {
+  function setupRecoveredUI() {
     const body = byId('resultsBody');
-    if (!body) return false;
+    if (!body || byId('poppasRecoveredToolbar')) return;
     const table = body.closest('table');
-    if (!table) return false;
-    let thead = table.querySelector('thead');
-    if (!thead) { thead = document.createElement('thead'); table.prepend(thead); }
-    thead.innerHTML = '<tr>' + HEADERS.map(([key,label,title]) => `<th data-sort="${esc(key)}" title="${esc(title)}">${esc(label)}</th>`).join('') + '</tr>';
-    thead.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => {
+    const wrap = body.closest('.table-wrap') || table;
+    if (!table || !wrap) return;
+
+    table.querySelector('thead').innerHTML = `<tr>
+      ${[
+        ['review','Review'],['symbol','Symbol'],['expiry','Expiration'],['dte','DTE'],['spot','Spot'],
+        ['shortPut','Short Put'],['longPut','Long Put'],['shortCall','Short Call'],['longCall','Long Call'],['requestedWidth','Width'],
+        ['anchorPutOTM','Anchor P(OTM)'],['anchorCallOTM','Anchor C(OTM)'],['lowerAnchorPOTM','Lower Anchor P(OTM)'],
+        ['naturalCredit','Natural Credit'],['midpointCredit','Midpoint Credit'],['displayedCredit','Displayed Credit'],
+        ['grossROC','Gross ROC'],['rocAfterCommissionAndFees','ROC After Costs'],['monthlyChainIV','Monthly Chain IV'],
+        ['openInterest','Monthly Chain OI'],['shortPutOI','Short Put OI'],['shortCallOI','Short Call OI'],['spreadMax','Max B/A Spread'],
+        ['expectedMove','Expected Move'],['expectedMoveStatus','EM Status'],['earnings','Earnings'],['strikeValidationStatus','Strike Validation'],['reviewStatus','Review Status']
+      ].map(([k,l]) => `<th data-sort="${k}">${l}</th>`).join('')}
+    </tr>`;
+
+    const toolbar = document.createElement('div');
+    toolbar.id = 'poppasRecoveredToolbar';
+    toolbar.innerHTML = `
+      <button id="recoveredScanNowBtn" class="btn primary" type="button">Scan Now</button>
+      <button id="recoveredScanMoreBtn" class="btn secondary" type="button">Scan For More Records</button>
+      <span id="recoveredStatus" class="pill">Waiting</span>`;
+    wrap.parentNode.insertBefore(toolbar, wrap);
+
+    const panel = document.createElement('div');
+    panel.id = 'recoveredOrderTicket';
+    panel.className = 'panel';
+    panel.innerHTML = '<p class="eyebrow">Selected Candidate</p><h2 class="title">POPPA’S Educational Order Ticket</h2><div class="note"><strong>Displayed credit uses Schwab bid/ask midpoint values.</strong> Actual fills may differ.</div><div id="recoveredTicketContent" class="recovered-ticket-grid"><div class="recovered-ticket-item"><span>Status</span><strong>Select a candidate row</strong></div></div>';
+    wrap.insertAdjacentElement('afterend', panel);
+
+    byId('recoveredScanNowBtn').addEventListener('click', () => load(false));
+    byId('recoveredScanMoreBtn').addEventListener('click', () => load(true));
+    table.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => {
       const key = th.dataset.sort;
       if (key === 'review') return;
-      if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = key === 'symbol' || key === 'expiry' || key === 'strikeValidationStatus' || key === 'reviewStatus' ? 1 : -1; }
+      if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = ['symbol','expiry','strikeValidationStatus','reviewStatus'].includes(key) ? 1 : -1; }
       render();
     }));
-    return true;
-  }
-
-  function setupToolbar() {
-    const body = byId('resultsBody');
-    if (!body || byId('poppasSandboxToolbar')) return;
-    const wrap = body.closest('.table-wrap') || body.closest('table');
-    const toolbar = document.createElement('div');
-    toolbar.id = 'poppasSandboxToolbar';
-    toolbar.innerHTML = `
-      <button id="sandboxRefreshBtn" class="btn primary" type="button">Load Updated Candidates</button>
-      <button id="sandboxExportBtn" class="btn secondary" type="button">Export CSV</button>
-      <label><input id="sandboxShowRejected" type="checkbox"> Show Rejected Strike Candidates</label>
-      <span id="sandboxTableStatus" class="pill">Waiting</span>`;
-    wrap.parentNode.insertBefore(toolbar, wrap);
-    byId('sandboxRefreshBtn').addEventListener('click', load);
-    byId('sandboxExportBtn').addEventListener('click', () => {
-      const diagnostic = byId('sandboxShowRejected').checked ? '?includeRejected=true' : '';
-      window.location.href = EXPORT_ENDPOINT + diagnostic;
+    ['rocMin','rocMax','minProb','ivMin','minOI','minShortOI','maxSpread','spreadWidth','dteWindow','maxResults'].forEach(id => {
+      const el = byId(id); if (el) el.addEventListener('change', render);
     });
-    byId('sandboxShowRejected').addEventListener('change', load);
   }
 
-  function setupTicket() {
-    if (byId('sandboxOrderTicket')) return;
-    const body = byId('resultsBody');
-    const wrap = body && (body.closest('.table-wrap') || body.closest('table'));
-    if (!wrap) return;
-    const panel = document.createElement('div');
-    panel.id = 'sandboxOrderTicket';
-    panel.className = 'panel';
-    panel.innerHTML = '<p class="eyebrow">Selected Candidate</p><h2 class="title">POPPA’S Educational Order Ticket</h2><div class="note"><strong>Displayed credit uses Schwab bid/ask midpoint values.</strong> Actual fills may differ.</div><div id="sandboxTicketContent" class="sandbox-ticket-grid"><div class="sandbox-ticket-item"><span>Status</span><strong>Select a candidate row</strong></div></div>';
-    wrap.insertAdjacentElement('afterend',panel);
-  }
-
-  function valueForSort(r,key) {
-    if (key === 'symbol' || key === 'expiry' || key === 'strikeValidationStatus' || key === 'reviewStatus') return String(r[key] || '');
-    return num(r[key], -Infinity);
+  function lowerAsPercent(r) {
+    const v = num(r.lowerAnchorPOTM, 0);
+    return Math.abs(v) <= 1 ? v * 100 : v;
   }
 
   function applyFilters(list) {
@@ -238,139 +162,119 @@
     const shortOiMin = num(byId('minShortOI') && byId('minShortOI').value, -Infinity);
     const maxSpread = num(byId('maxSpread') && byId('maxSpread').value, Infinity);
     const width = num(byId('spreadWidth') && byId('spreadWidth').value, 0);
-    const dteParts = String(byId('dteWindow') ? byId('dteWindow').value : '15-45').match(/(\d+)\D+(\d+)/);
-    const dteMin = dteParts ? Number(dteParts[1]) : 15;
+    const dteParts = String(byId('dteWindow') ? byId('dteWindow').value : '0-45').match(/(\d+)\D+(\d+)/);
+    const dteMin = dteParts ? Number(dteParts[1]) : 0;
     const dteMax = dteParts ? Number(dteParts[2]) : 45;
-    const showRejected = Boolean(byId('sandboxShowRejected') && byId('sandboxShowRejected').checked);
+
     return list.filter(r => {
-      if (!showRejected && r.strikeValidationStatus !== 'PASS') return false;
-      const lower = Math.abs(num(r.lowerAnchorPOTM,0)) <= 1 ? num(r.lowerAnchorPOTM,0)*100 : num(r.lowerAnchorPOTM,0);
-      if (lower < minProb) return false;
-      if (num(r.rocAfterCommissionAndFees,-Infinity) < rocMin || num(r.rocAfterCommissionAndFees,Infinity) > rocMax) return false;
-      const iv = Math.abs(num(r.monthlyChainIV,0)) <= 1 ? num(r.monthlyChainIV,0)*100 : num(r.monthlyChainIV,0);
+      if (!includeMoreRecords && r.strikeValidationStatus !== 'PASS') return false;
+      if (lowerAsPercent(r) < minProb) return false;
+      if (num(r.rocAfterCommissionAndFees, -Infinity) < rocMin || num(r.rocAfterCommissionAndFees, Infinity) > rocMax) return false;
+      const iv = Math.abs(num(r.monthlyChainIV, 0)) <= 1 ? num(r.monthlyChainIV, 0) * 100 : num(r.monthlyChainIV, 0);
       if (iv < ivMin) return false;
-      if (num(r.openInterest,0) < oiMin || num(r.shortPutOI,0) < shortOiMin || num(r.shortCallOI,0) < shortOiMin) return false;
-      if (num(r.spreadMax,Infinity) > maxSpread) return false;
+      if (num(r.openInterest, 0) < oiMin || num(r.shortPutOI, 0) < shortOiMin || num(r.shortCallOI, 0) < shortOiMin) return false;
+      if (num(r.spreadMax, Infinity) > maxSpread) return false;
       if (width > 0 && num(r.requestedWidth) !== width) return false;
-      if (num(r.dte,-Infinity) < dteMin || num(r.dte,Infinity) > dteMax) return false;
+      if (num(r.dte, -Infinity) < dteMin || num(r.dte, Infinity) > dteMax) return false;
       return true;
     });
   }
 
-  function earningsText(r) {
-    if (r.earnings === false) return 'Clear';
-    const date = pick(r.earningsDate,r.earnings_date,r.nextEarnings,r.next_earnings);
-    if (date) return 'Earnings ' + isoDate(date);
-    return r.earnings === true ? 'Earnings in window' : 'Verify';
+  function sortValue(r, key) {
+    if (['symbol','expiry','strikeValidationStatus','reviewStatus'].includes(key)) return String(r[key] || '');
+    return num(r[key], -Infinity);
   }
 
   function render() {
     const body = byId('resultsBody');
+    const status = byId('recoveredStatus');
     if (!body) return;
     shownRows = applyFilters(rows.slice());
     shownRows.sort((a,b) => {
-      if (a.strikeValidationStatus !== b.strikeValidationStatus) return a.strikeValidationStatus === 'PASS' ? -1 : 1;
-      const av = valueForSort(a,sortKey), bv = valueForSort(b,sortKey);
+      const av = sortValue(a, sortKey), bv = sortValue(b, sortKey);
       if (typeof av === 'string') return av.localeCompare(bv) * sortDir;
-      const primary = (av - bv) * sortDir;
-      if (primary) return primary;
-      const lower = num(b.lowerAnchorPOTM,0) - num(a.lowerAnchorPOTM,0);
-      return lower || num(b.openInterest,0) - num(a.openInterest,0);
+      return (av - bv) * sortDir;
     });
-    const maxResults = Math.max(1, Math.min(500, num(byId('maxResults') && byId('maxResults').value,50)));
-    shownRows = shownRows.slice(0,maxResults);
+    const maxResults = Math.max(1, Math.min(500, num(byId('maxResults') && byId('maxResults').value, 50)));
+    shownRows = shownRows.slice(0, maxResults);
+
+    if (byId('candidateCount')) byId('candidateCount').textContent = shownRows.length;
+    if (byId('scanMode')) byId('scanMode').textContent = includeMoreRecords ? 'Expanded records' : 'Live candidates';
+    if (status) status.textContent = `${shownRows.length.toLocaleString()} displayed · ${rows.length.toLocaleString()} loaded`;
+
     if (!shownRows.length) {
-      body.innerHTML = '<tr><td colspan="28" class="empty">No candidates match the current sandbox controls.</td></tr>';
-      byId('sandboxTableStatus').textContent = '0 displayed';
+      body.innerHTML = '<tr><td colspan="28" class="empty">No live candidates match the current controls.</td></tr>';
       return;
     }
+
     body.innerHTML = shownRows.map((r,i) => {
-      const widthTitle = `Requested Width: ${money(r.requestedWidth)}\nActual Put Width: ${money(r.actualPutWidth)}\nActual Call Width: ${money(r.actualCallWidth)}\nEqual Widths: ${r.equalWidthConfirmed ? 'Confirmed' : 'Not confirmed'}`;
-      const lowerTitle = 'The lower of the short-put and short-call Probability OTM values. It identifies the weaker anchor leg and is not a guaranteed whole-condor probability.';
-      const afterTitle = `Commission: $2.40\nFees: $0.04\nTotal Cost: $2.44\nNet Credit After Costs: ${money(r.netCreditAfterCosts)}\nNet Maximum Risk: ${money(r.netMaxRiskAfterCosts)}`;
       const strikeClass = r.strikeValidationStatus === 'PASS' ? 'strike-pass' : 'strike-rejected';
-      const em = String(r.expectedMoveStatus||'').toLowerCase();
+      const em = String(r.expectedMoveStatus || '').toLowerCase();
       const emClass = em.includes('outside') ? 'em-out' : em.includes('inside') ? 'em-in' : em.includes('near') ? 'em-near' : 'warn';
       return `<tr data-index="${i}">
-        <td><button class="sandbox-review-btn" type="button">Review</button></td>
-        <td><strong>${esc(r.symbol)}</strong></td><td>${esc(isoDate(r.expiry))}</td><td>${esc(r.dte)}</td><td title="Source: Schwab raw underlying price">${money(r.spot)}</td>
-        <td title="${esc(legTitle(r,'shortPut',r.shortPutContractSymbol,true))}">${esc(r.shortPut)}</td>
-        <td title="${esc(legTitle(r,'longPut',r.longPutContractSymbol,false))}">${esc(r.longPut)}</td>
-        <td title="${esc(legTitle(r,'shortCall',r.shortCallContractSymbol,true))}">${esc(r.shortCall)}</td>
-        <td title="${esc(legTitle(r,'longCall',r.longCallContractSymbol,false))}">${esc(r.longCall)}</td>
-        <td title="${esc(widthTitle)}">${money(r.requestedWidth)}</td>
-        <td title="Probability OTM for the short-put anchor leg. Schwab raw when provided; otherwise POPPA’S delta-based approximation.\nSource: ${esc(pick(r.anchorPutSource,'Verify'))}\nMethod: ${esc(pick(r.anchorPutMethod,'Verify'))}">${percent(r.anchorPutOTM)}</td>
-        <td title="Probability OTM for the short-call anchor leg. Schwab raw when provided; otherwise POPPA’S delta-based approximation.\nSource: ${esc(pick(r.anchorCallSource,'Verify'))}\nMethod: ${esc(pick(r.anchorCallMethod,'Verify'))}">${percent(r.anchorCallOTM)}</td>
-        <td title="${esc(lowerTitle)}">${percent(r.lowerAnchorPOTM)}</td>
-        <td title="POPPA’S calculated natural credit using Schwab raw bid and ask values.">${money(r.naturalCredit)}</td>
-        <td title="POPPA’S calculated from Schwab bid/ask midpoint values.">${money(r.midpointCredit)}</td>
-        <td title="Credit Source: ${esc(pick(r.creditSource,'POPPA calculated from Schwab bid/ask midpoint values'))}\nCredit Method: ${esc(pick(r.creditMethod,'Short-leg midpoints minus long-leg midpoints'))}">${money(r.displayedCredit)}</td>
-        <td title="Gross return on risk before commission and fees. POPPA’S calculated.">${percent(r.grossROC)}</td>
-        <td title="${esc(afterTitle)}">${percent(r.rocAfterCommissionAndFees)}</td>
-        <td title="Source: ${esc(pick(r.monthlyChainIVSource,'Verify'))}\nMethod: ${esc(pick(r.monthlyChainIVMethod,'Verify'))}\nFallback: ${esc(pick(r.monthlyChainIVFallbackReason,'None'))}">${percent(r.monthlyChainIV)}</td>
-        <td>${whole(r.openInterest)}</td><td>${whole(r.shortPutOI)}</td><td>${whole(r.shortCallOI)}</td>
-        <td title="Largest Schwab bid/ask spread among the four selected legs.">${money(r.spreadMax)}</td>
-        <td title="Source: ${esc(pick(r.expectedMoveSource,'POPPA calculated'))}\nMethod: ${esc(pick(r.expectedMoveMethod,'Verify'))}\nFallback: ${esc(pick(r.expectedMoveFallbackReason,'None'))}">${r.expectedMove === null || r.expectedMove === undefined ? '—' : '±'+money(r.expectedMove)}</td>
-        <td class="${emClass}">${esc(r.expectedMoveStatus)}</td><td>${esc(earningsText(r))}</td>
-        <td class="${strikeClass}" title="${esc(r.strikeValidationReason)}">${esc(r.strikeValidationStatus)}<div class="sandbox-source-note">${esc(r.strikeValidationReason)}</div></td>
-        <td>${esc(r.reviewStatus)}<div class="sandbox-source-note">Educational review classification only; not a trade recommendation.</div></td>
+        <td><button class="sandbox-review-btn" type="button">Review</button></td><td><strong>${esc(r.symbol)}</strong></td><td>${esc(isoDate(r.expiry))}</td><td>${esc(r.dte)}</td><td>${money(r.spot)}</td>
+        <td>${esc(r.shortPut)}</td><td>${esc(r.longPut)}</td><td>${esc(r.shortCall)}</td><td>${esc(r.longCall)}</td><td>${money(r.requestedWidth)}</td>
+        <td>${percent(r.anchorPutOTM)}</td><td>${percent(r.anchorCallOTM)}</td><td>${percent(r.lowerAnchorPOTM)}</td>
+        <td>${money(r.naturalCredit)}</td><td>${money(r.midpointCredit)}</td><td>${money(r.displayedCredit)}</td>
+        <td>${percent(r.grossROC)}</td><td>${percent(r.rocAfterCommissionAndFees)}</td><td>${percent(r.monthlyChainIV)}</td>
+        <td>${whole(r.openInterest)}</td><td>${whole(r.shortPutOI)}</td><td>${whole(r.shortCallOI)}</td><td>${money(r.spreadMax)}</td>
+        <td>${r.expectedMove === null || r.expectedMove === undefined ? '—' : '±' + money(r.expectedMove)}</td><td class="${emClass}">${esc(r.expectedMoveStatus)}</td><td>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</td>
+        <td class="${strikeClass}">${esc(r.strikeValidationStatus)}<div class="recovered-source-note">${esc(r.strikeValidationReason)}</div></td>
+        <td>${esc(r.reviewStatus)}<div class="recovered-source-note">Educational review only; not a recommendation.</div></td>
       </tr>`;
     }).join('');
     body.querySelectorAll('tr[data-index]').forEach(tr => tr.addEventListener('click', () => selectRow(Number(tr.dataset.index))));
-    byId('sandboxTableStatus').textContent = `${shownRows.length.toLocaleString()} displayed · ${rows.length.toLocaleString()} loaded`;
     selectRow(0);
   }
 
   function selectRow(index) {
-    selectedIndex = index;
     const r = shownRows[index];
-    if (!r) return;
+    if (!r || !byId('recoveredTicketContent')) return;
     const body = byId('resultsBody');
     body.querySelectorAll('tr').forEach(tr => tr.classList.remove('row-active'));
     const active = body.querySelector(`tr[data-index="${index}"]`);
     if (active) active.classList.add('row-active');
     const fields = [
-      ['Short Put',r.shortPut],['Long Put',r.longPut],['Short Call',r.shortCall],['Long Call',r.longCall],
-      ['Requested Width',money(r.requestedWidth)],['Actual Put Width',money(r.actualPutWidth)],['Actual Call Width',money(r.actualCallWidth)],['Exact-Width Validation',r.strikeValidationStatus+' — '+r.strikeValidationReason],
-      ['Natural Credit',money(r.naturalCredit)],['Midpoint Credit',money(r.midpointCredit)],['Displayed Credit',money(r.displayedCredit)],['Commission','$2.40'],['Fees','$0.04'],
-      ['Net Credit After Costs',money(r.netCreditAfterCosts)],['Gross Maximum Risk',money(r.grossMaxRisk)],['Net Maximum Risk After Costs',money(r.netMaxRiskAfterCosts)],
-      ['Gross ROC',percent(r.grossROC)],['ROC After Commission & Fees',percent(r.rocAfterCommissionAndFees)],['Anchor P(OTM)',percent(r.anchorPutOTM)],['Anchor C(OTM)',percent(r.anchorCallOTM)],['Lower Anchor P(OTM)',percent(r.lowerAnchorPOTM)],
-      ['Expected Move',r.expectedMove == null ? '—' : '±'+money(r.expectedMove)],['Quote Time',pick(r.quoteTimeRaw,r.asOf,'Verify')],['Data Source',pick(r.dataSource,'Schwab/TOS Market Data API')]
+      ['Short Put', r.shortPut], ['Long Put', r.longPut], ['Short Call', r.shortCall], ['Long Call', r.longCall],
+      ['Width', money(r.requestedWidth)], ['Strike Validation', r.strikeValidationStatus + ' — ' + r.strikeValidationReason],
+      ['Displayed Credit', money(r.displayedCredit)], ['ROC After Costs', percent(r.rocAfterCommissionAndFees)],
+      ['Anchor P(OTM)', percent(r.anchorPutOTM)], ['Anchor C(OTM)', percent(r.anchorCallOTM)], ['Lower Anchor P(OTM)', percent(r.lowerAnchorPOTM)],
+      ['Data Source', pick(r.dataSource, 'Schwab/TOS Market Data API')]
     ];
-    byId('sandboxTicketContent').innerHTML = fields.map(([label,value]) => `<div class="sandbox-ticket-item"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+    byId('recoveredTicketContent').innerHTML = fields.map(([label,value]) => `<div class="recovered-ticket-item"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
   }
 
-  async function load() {
-    const status = byId('sandboxTableStatus');
-    if (status) status.textContent = 'Loading…';
-    const includeRejected = Boolean(byId('sandboxShowRejected') && byId('sandboxShowRejected').checked);
+  async function load(more) {
+    includeMoreRecords = Boolean(more);
+    const status = byId('recoveredStatus');
+    if (status) status.textContent = includeMoreRecords ? 'Scanning for more records…' : 'Scanning live candidates…';
     try {
-      const response = await fetch(RESULTS_ENDPOINT + (includeRejected ? '?includeRejected=true' : ''), { cache:'no-store', headers:{accept:'application/json'} });
+      const url = RESULTS_ENDPOINT + (includeMoreRecords ? '?includeRejected=true&passersTop=true' : '?passersTop=true');
+      const response = await fetch(url, { cache: 'no-store', headers: { accept: 'application/json' } });
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const data = await response.json();
-      rows = (Array.isArray(data.results) ? data.results : Array.isArray(data.rows) ? data.rows : []).map(normalized);
+      rows = (Array.isArray(data.results) ? data.results : Array.isArray(data.rows) ? data.rows : []).map(normalize);
+
+      if (byId('truthDataMode')) byId('truthDataMode').textContent = pick(data.dataMode, data.scanMode, 'Schwab/TOS market data');
+      if (byId('truthBuild')) byId('truthBuild').textContent = data.building ? 'Building' : 'Ready';
+      if (byId('truthUniverse')) byId('truthUniverse').textContent = whole(pick(data.universeCount, data.total, rows.length));
+      if (byId('truthLastScan')) byId('truthLastScan').textContent = pick(data.generatedAt, 'Available');
+      if (byId('scanStamp')) byId('scanStamp').textContent = data.generatedAt ? 'Scanned ' + new Date(data.generatedAt).toLocaleString() : 'Live data';
+      if (byId('universeCount')) byId('universeCount').textContent = whole(pick(data.universeCount, rows.length));
+
       render();
-      const truth = byId('truthDataMode'); if (truth) truth.textContent = pick(data.dataMode,data.scanMode,'Schwab/TOS market data');
-      const build = byId('truthBuild'); if (build) build.textContent = data.building ? 'Building' : 'Ready';
-      const universe = byId('truthUniverse'); if (universe) universe.textContent = whole(pick(data.universeCount,data.total,rows.length));
-      const last = byId('truthLastScan'); if (last) last.textContent = pick(data.generatedAt,'Available');
     } catch (error) {
-      if (status) status.textContent = 'Load failed';
+      rows = [];
       const body = byId('resultsBody');
-      if (body) body.innerHTML = `<tr><td colspan="28" class="empty">Unable to load sandbox candidates: ${esc(error.message)}</td></tr>`;
+      if (status) status.textContent = 'Live candidate load failed';
+      if (body) body.innerHTML = `<tr><td colspan="28" class="empty">Unable to load live candidates from Netlify/Supabase: ${esc(error.message)}</td></tr>`;
     }
   }
 
-  function bindControls() {
-    ['rocMin','rocMax','minProb','ivMin','minOI','minShortOI','maxSpread','spreadWidth','dteWindow','maxResults'].forEach(id => {
-      const el = byId(id); if (el) el.addEventListener('change',render);
-    });
-  }
-
   function init() {
-    addStyles(); updateLabels();
-    if (!setupTable()) return;
-    setupToolbar(); setupTicket(); bindControls(); load();
+    addStyles();
+    setupRecoveredUI();
+    load(false);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
