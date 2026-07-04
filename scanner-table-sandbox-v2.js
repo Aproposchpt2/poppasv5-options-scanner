@@ -1,4 +1,4 @@
-// POPPA'S Scanner Table Sandbox — live-data controller with BX ticket and strike graph population.
+// POPPA'S Scanner Table Sandbox — live controller with polished order ticket, graph, and page cleanup.
 (function () {
   'use strict';
 
@@ -6,7 +6,6 @@
   const COMMISSION = 2.40;
   const FEES = 0.04;
   const TOTAL_COST = COMMISSION + FEES;
-
   let rows = [];
   let shownRows = [];
   let includeMoreRecords = false;
@@ -23,12 +22,7 @@
   const esc = v => String(v ?? '—').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   const money = v => num(v) === null ? '—' : '$' + num(v).toFixed(2);
   const whole = v => num(v) === null ? '—' : Math.round(num(v)).toLocaleString();
-  const percent = v => {
-    const n = num(v);
-    if (n === null) return '—';
-    const p = Math.abs(n) <= 1 ? n * 100 : n;
-    return p.toFixed(1) + '%';
-  };
+  const percent = v => { const n = num(v); if (n === null) return '—'; const p = Math.abs(n) <= 1 ? n * 100 : n; return p.toFixed(1) + '%'; };
   const isoDate = v => v ? String(v).slice(0, 10) : '—';
 
   function addStyles() {
@@ -39,15 +33,14 @@
       #runScanBtn,#rescanBtn,#resetBtn,#loadNextBtn,#downloadCsvBtn,#scanProgress{display:none!important}
       #poppasRecoveredToolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0 18px}
       #poppasRecoveredToolbar .pill{min-height:44px;display:inline-flex;align-items:center}
-      .recovered-source-note{font-size:.78rem;color:var(--muted);margin-top:5px;white-space:normal;min-width:170px}
-      .strike-pass{color:var(--green);font-weight:900}.strike-rejected{color:var(--red);font-weight:900}
       .table-wrap table{min-width:4200px}.table-wrap th{cursor:pointer}.table-wrap td{white-space:nowrap}.table-wrap td:last-child{white-space:normal;min-width:240px}
-      #recoveredOrderTicket{margin-top:18px}.recovered-ticket-grid,.ticket-live-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:10px;margin-top:14px}
-      .recovered-ticket-item,.ticket-live-item{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(255,255,255,.04)}
-      .recovered-ticket-item span,.ticket-live-item span{display:block;color:var(--muted);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase}.recovered-ticket-item strong,.ticket-live-item strong{display:block;color:#fff;margin-top:4px}
-      .ticket-live-item.sell strong{color:var(--green)}.ticket-live-item.buy strong{color:var(--cyan)}.ticket-live-item.warn strong{color:var(--amber)}
-      #liveStrikeGraph{margin-top:18px}.live-graph-meta{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px;margin-top:12px}.live-graph-meta div{border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(255,255,255,.04)}.live-graph-meta span{display:block;color:var(--muted);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase}.live-graph-meta strong{color:#fff}.live-graph{position:relative;height:126px;margin-top:18px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));overflow:hidden}.live-axis{position:absolute;left:6%;right:6%;top:58px;height:2px;background:rgba(191,214,255,.35)}.live-profit-zone{position:absolute;top:44px;height:30px;border-radius:999px;background:rgba(62,227,145,.18);border:1px solid rgba(62,227,145,.45)}.live-em-zone{position:absolute;top:82px;height:14px;border-radius:999px;background:rgba(242,180,71,.18);border:1px solid rgba(242,180,71,.45)}.live-marker{position:absolute;top:28px;width:2px;height:62px;background:#fff;box-shadow:0 0 12px rgba(123,220,255,.65)}.live-marker.put{background:var(--green)}.live-marker.buy{background:var(--cyan)}.live-marker.call{background:var(--green)}.live-marker.spot{background:#fff;width:3px}.live-marker span{position:absolute;top:-24px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:.62rem;font-weight:900;letter-spacing:.08em;color:#fff;background:rgba(2,8,22,.92);border:1px solid var(--line);border-radius:999px;padding:3px 7px}.live-scale{position:absolute;left:6%;right:6%;bottom:12px;display:flex;justify-content:space-between;color:var(--muted);font-size:.75rem}.live-graph-note{margin-top:10px;color:var(--muted);font-size:.86rem}.live-graph-note b{color:#fff}
-      @media(max-width:700px){.recovered-ticket-grid,.ticket-live-grid,.live-graph-meta{grid-template-columns:1fr}.table-wrap{max-width:100%;overflow-x:auto}}
+      .strike-pass{color:var(--green);font-weight:900}.strike-rejected{color:var(--red);font-weight:900}.recovered-source-note{font-size:.78rem;color:var(--muted);margin-top:5px;white-space:normal;min-width:170px}
+      .ticket-live-grid,.recovered-ticket-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:14px;margin-top:14px}.ticket-math-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:14px;margin-top:14px}
+      .ticket-live-item,.recovered-ticket-item{border:1px solid rgba(191,214,255,.26);border-radius:15px;padding:15px 16px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));min-height:88px}
+      .ticket-live-item span,.recovered-ticket-item span{display:block;color:var(--cyan);font-size:.7rem;line-height:1.1;letter-spacing:.12em;text-transform:uppercase;font-weight:900}.ticket-live-item strong,.recovered-ticket-item strong{display:block;color:#fff;font-size:1.2rem;margin-top:7px;line-height:1.1}.ticket-live-item.small strong{font-size:1.04rem}.ticket-live-item.anchor strong{color:var(--red)}.ticket-live-item.offset strong{color:var(--green)}.ticket-live-item.warn strong{color:var(--amber)}
+      #liveCandidateTicketContent{display:block!important}.ticket-card-note{border-left:4px solid var(--cyan);background:rgba(30,167,255,.1);padding:14px 16px;border-radius:0 12px 12px 0;margin:14px 0 4px;color:#eaf3ff;font-weight:700}.ticket-section-title{font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);font-weight:900;margin-top:18px}.ticket-card-title{font-family:var(--disp);font-size:2rem;line-height:1.05;color:#fff;margin:2px 0 8px}
+      #liveStrikeGraph{margin-top:18px}.live-graph-meta{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px;margin-top:12px}.live-graph-meta div{border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(255,255,255,.04)}.live-graph-meta span{display:block;color:var(--muted);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase}.live-graph-meta strong{color:#fff}.live-graph{position:relative;height:126px;margin-top:18px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));overflow:hidden}.live-axis{position:absolute;left:6%;right:6%;top:58px;height:2px;background:rgba(191,214,255,.35)}.live-profit-zone{position:absolute;top:44px;height:30px;border-radius:999px;background:rgba(62,227,145,.18);border:1px solid rgba(62,227,145,.45)}.live-em-zone{position:absolute;top:82px;height:14px;border-radius:999px;background:rgba(242,180,71,.18);border:1px solid rgba(242,180,71,.45)}.live-marker{position:absolute;top:28px;width:2px;height:62px;background:#fff;box-shadow:0 0 12px rgba(123,220,255,.65)}.live-marker.put,.live-marker.call{background:var(--red)}.live-marker.buy{background:var(--green)}.live-marker.spot{background:#fff;width:3px}.live-marker span{position:absolute;top:-24px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:.62rem;font-weight:900;letter-spacing:.08em;color:#fff;background:rgba(2,8,22,.92);border:1px solid var(--line);border-radius:999px;padding:3px 7px}.live-scale{position:absolute;left:6%;right:6%;bottom:12px;display:flex;justify-content:space-between;color:var(--muted);font-size:.75rem}.live-graph-note{margin-top:10px;color:var(--muted);font-size:.86rem}.live-graph-note b{color:#fff}
+      @media(max-width:800px){.ticket-live-grid,.recovered-ticket-grid,.ticket-math-grid,.live-graph-meta{grid-template-columns:1fr}.table-wrap{max-width:100%;overflow-x:auto}}
     `;
     document.head.appendChild(s);
   }
@@ -58,8 +51,6 @@
     const shortCall = num(pick(r.shortCall, r.short_call));
     const longCall = num(pick(r.longCall, r.long_call));
     const requestedWidth = num(pick(r.requestedWidth, r.width));
-    const actualPutWidth = num(pick(r.actualPutWidth, shortPut !== null && longPut !== null ? shortPut - longPut : null));
-    const actualCallWidth = num(pick(r.actualCallWidth, longCall !== null && shortCall !== null ? longCall - shortCall : null));
     const lowerAnchorPOTM = num(pick(r.lowerAnchorPOTM, r.lowerAnchorPOTMPercent, r.prob, r.probOtm, r.prob_otm));
     const anchorPutOTM = num(pick(r.anchorPutOTM, r.putProbOtm, r.put_prob_otm));
     const anchorCallOTM = num(pick(r.anchorCallOTM, r.callProbOtm, r.call_prob_otm));
@@ -72,9 +63,32 @@
     const netMaxRiskAfterCosts = requestedWidth !== null && netCreditAfterCosts !== null ? requestedWidth * 100 - netCreditAfterCosts : null;
     const grossROC = num(pick(r.grossROC, r.roc), grossCreditDollars !== null && grossMaxRisk > 0 ? grossCreditDollars / grossMaxRisk * 100 : null);
     const rocAfterCommissionAndFees = num(pick(r.rocAfterCommissionAndFees, r.rocAfterCosts), netCreditAfterCosts !== null && netMaxRiskAfterCosts > 0 ? netCreditAfterCosts / netMaxRiskAfterCosts * 100 : null);
+    const maxRiskAfterCosts = netMaxRiskAfterCosts !== null ? netMaxRiskAfterCosts / 100 : null;
     const strikeValidationStatus = pick(r.strikeValidationStatus, r.strike_validation_status, 'PASS');
     const strikeValidationReason = pick(r.strikeValidationReason, r.strike_validation_reason, 'Validation pending; database row has no rejection status');
-    return { ...r, symbol: pick(r.symbol, r.ticker), expiry: pick(r.expiry, r.expiration), dte: num(r.dte), spot: num(pick(r.spot, r.underlyingPrice)), shortPut, longPut, shortCall, longCall, requestedWidth, actualPutWidth, actualCallWidth, anchorPutOTM, anchorCallOTM, lowerAnchorPOTM, naturalCredit, midpointCredit, displayedCredit, grossROC, rocAfterCommissionAndFees, monthlyChainIV: pick(r.monthlyChainIVDisplay, r.monthlyChainIV, r.ivDisplay, r.iv), openInterest: pick(r.openInterest, r.monthlyOI, r.open_interest, r.oi), shortPutOI: pick(r.shortPutOI, r.short_put_oi), shortCallOI: pick(r.shortCallOI, r.short_call_oi), spreadMax: pick(r.spreadMax, r.spread_max, r.spread), expectedMove: pick(r.expectedMoveDisplay, r.expectedMove, r.expected_move), expectedMoveStatus: pick(r.expectedMoveStatus, r.expected_move_status, 'Verify'), earningsDate: pick(r.earningsDate, r.nextEarnings, r.next_earnings), earnings: pick(r.earnings, r.earn), strikeValidationStatus, strikeValidationReason, reviewStatus: pick(r.reviewStatus, r.review_status, strikeValidationStatus === 'PASS' ? 'Matches primary filters ✓' : 'REJECTED — ' + strikeValidationReason) };
+    return { ...r, symbol: pick(r.symbol, r.ticker), expiry: pick(r.expiry, r.expiration), dte: num(r.dte), spot: num(pick(r.spot, r.underlyingPrice)), shortPut, longPut, shortCall, longCall, requestedWidth, actualPutWidth: num(pick(r.actualPutWidth, shortPut !== null && longPut !== null ? shortPut - longPut : null)), actualCallWidth: num(pick(r.actualCallWidth, longCall !== null && shortCall !== null ? longCall - shortCall : null)), anchorPutOTM, anchorCallOTM, lowerAnchorPOTM, naturalCredit, midpointCredit, displayedCredit, grossROC, rocAfterCommissionAndFees, maxRiskAfterCosts, monthlyChainIV: pick(r.monthlyChainIVDisplay, r.monthlyChainIV, r.ivDisplay, r.iv), openInterest: pick(r.openInterest, r.monthlyOI, r.open_interest, r.oi), shortPutOI: pick(r.shortPutOI, r.short_put_oi), shortCallOI: pick(r.shortCallOI, r.short_call_oi), spreadMax: pick(r.spreadMax, r.spread_max, r.spread), expectedMove: pick(r.expectedMoveDisplay, r.expectedMove, r.expected_move), expectedMoveStatus: pick(r.expectedMoveStatus, r.expected_move_status, 'Verify'), earningsDate: pick(r.earningsDate, r.nextEarnings, r.next_earnings), earnings: pick(r.earnings, r.earn), strikeValidationStatus, strikeValidationReason, reviewStatus: pick(r.reviewStatus, r.review_status, strikeValidationStatus === 'PASS' ? 'Matches primary filters ✓' : 'REJECTED — ' + strikeValidationReason) };
+  }
+
+  function cosmeticCleanup() {
+    const hideText = ['Wider sortable table · Short OI column removed','Preview-page source-of-truth test','No backend filtering: Run Scanner Now calls'];
+    Array.from(document.querySelectorAll('h1,h2,h3,p,div,details,summary')).forEach(el => {
+      const txt = (el.textContent || '').trim();
+      if (hideText.some(t => txt.includes(t))) {
+        const container = el.closest('details') || el.closest('.card') || el.closest('.panel') || el;
+        container.style.display = 'none';
+      }
+    });
+    const faq = byId('faq');
+    if (faq && !byId('poppasFaqReplacement')) {
+      const box = document.createElement('div');
+      box.id = 'poppasFaqReplacement';
+      box.className = 'panel';
+      box.innerHTML = '<p class="eyebrow">FAQ</p><h2 class="title">Scanner questions</h2><div class="cards5"><div class="card"><h3>What does Scan Now do?</h3><p>It loads live Supabase candidate records created from the Schwab/TOS market-data pipeline.</p></div><div class="card"><h3>What does Scan For More Records do?</h3><p>It expands the visible candidate set for additional educational review.</p></div><div class="card"><h3>Are these trade recommendations?</h3><p>No. Rows are educational candidates only. Pricing, liquidity, expiration, earnings, and risk must be verified independently.</p></div><div class="card"><h3>What is ROC After Cost?</h3><p>It estimates return after standard commission and fee assumptions are included.</p></div><div class="card"><h3>What does Anchor P(OTM) mean?</h3><p>It is an anchor-leg probability metric, not a guaranteed whole-condor probability.</p></div></div>';
+      faq.appendChild(box);
+    }
+    Array.from(document.querySelectorAll('.foot,footer')).forEach(f => {
+      f.innerHTML = '<div>© 2026 Apropos Group LLC</div><div>Built by Poppas Intelligence OS<br>Powered by Innovative Engineering Intelligence</div>';
+    });
   }
 
   function setupRecoveredUI() {
@@ -83,18 +97,11 @@
     const table = body.closest('table');
     const wrap = body.closest('.table-wrap') || table;
     if (!table || !wrap) return;
-    table.querySelector('thead').innerHTML = `<tr>${[['review','Review'],['symbol','Symbol'],['expiry','Expiration'],['dte','DTE'],['spot','Spot'],['shortPut','Short Put'],['longPut','Long Put'],['shortCall','Short Call'],['longCall','Long Call'],['requestedWidth','Width'],['anchorPutOTM','Anchor P(OTM)'],['anchorCallOTM','Anchor C(OTM)'],['lowerAnchorPOTM','Lower Anchor P(OTM)'],['naturalCredit','Natural Credit'],['midpointCredit','Midpoint Credit'],['displayedCredit','Displayed Credit'],['grossROC','Gross ROC'],['rocAfterCommissionAndFees','ROC After Costs'],['monthlyChainIV','Monthly Chain IV'],['openInterest','Monthly Chain OI'],['shortPutOI','Short Put OI'],['shortCallOI','Short Call OI'],['spreadMax','Max B/A Spread'],['expectedMove','Expected Move'],['expectedMoveStatus','EM Status'],['earnings','Earnings'],['strikeValidationStatus','Strike Validation'],['reviewStatus','Review Status']].map(([k,l]) => `<th data-sort="${k}">${l}</th>`).join('')}</tr>`;
+    table.querySelector('thead').innerHTML = `<tr>${[['review','Review'],['symbol','Symbol'],['expiry','Expiration'],['dte','DTE'],['spot','Spot'],['shortPut','Short Put'],['longPut','Long Put'],['shortCall','Short Call'],['longCall','Long Call'],['requestedWidth','Width'],['anchorPutOTM','Put Anchor P(OTM)'],['anchorCallOTM','Call Anchor P(OTM)'],['lowerAnchorPOTM','Lower Anchor P(OTM)'],['naturalCredit','Natural Credit'],['midpointCredit','Midpoint Credit'],['displayedCredit','Displayed Credit'],['grossROC','Gross ROC'],['rocAfterCommissionAndFees','ROC After Costs'],['monthlyChainIV','Monthly Chain IV'],['openInterest','Monthly Chain OI'],['shortPutOI','Short Put OI'],['shortCallOI','Short Call OI'],['spreadMax','Max B/A Spread'],['expectedMove','Expected Move'],['expectedMoveStatus','EM Status'],['earnings','Earnings'],['strikeValidationStatus','Strike Validation'],['reviewStatus','Review Status']].map(([k,l]) => `<th data-sort="${k}">${l}</th>`).join('')}</tr>`;
     const toolbar = document.createElement('div');
     toolbar.id = 'poppasRecoveredToolbar';
     toolbar.innerHTML = '<button id="recoveredScanNowBtn" class="btn primary" type="button">Scan Now</button><button id="recoveredScanMoreBtn" class="btn secondary" type="button">Scan For More Records</button><span id="recoveredStatus" class="pill">Waiting</span>';
     wrap.parentNode.insertBefore(toolbar, wrap);
-    if (!byId('recoveredOrderTicket')) {
-      const panel = document.createElement('div');
-      panel.id = 'recoveredOrderTicket';
-      panel.className = 'panel';
-      panel.innerHTML = '<p class="eyebrow">Selected Candidate</p><h2 class="title">POPPA’S Educational Order Ticket</h2><div class="note"><strong>Displayed credit uses Schwab bid/ask midpoint values.</strong> Actual fills may differ.</div><div id="recoveredTicketContent" class="recovered-ticket-grid"><div class="recovered-ticket-item"><span>Status</span><strong>Select a candidate row</strong></div></div>';
-      wrap.insertAdjacentElement('afterend', panel);
-    }
     byId('recoveredScanNowBtn').addEventListener('click', () => load(false));
     byId('recoveredScanMoreBtn').addEventListener('click', () => load(true));
     table.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => { const key = th.dataset.sort; if (key === 'review') return; if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = ['symbol','expiry','strikeValidationStatus','reviewStatus'].includes(key) ? 1 : -1; } render(); }));
@@ -120,19 +127,30 @@
     if (byId('scanMode')) byId('scanMode').textContent = includeMoreRecords ? 'Expanded records' : 'Live candidates';
     if (status) status.textContent = `${shownRows.length.toLocaleString()} displayed · ${rows.length.toLocaleString()} loaded`;
     if (!shownRows.length) { body.innerHTML = '<tr><td colspan="28" class="empty">No live candidates match the current controls.</td></tr>'; clearTicket(); clearGraph(); return; }
-    body.innerHTML = shownRows.map((r,i) => { const strikeClass = r.strikeValidationStatus === 'PASS' ? 'strike-pass' : 'strike-rejected'; const em = String(r.expectedMoveStatus || '').toLowerCase(); const emClass = em.includes('outside') ? 'em-out' : em.includes('inside') ? 'em-in' : em.includes('near') ? 'em-near' : 'warn'; return `<tr data-index="${i}"><td><button class="sandbox-review-btn" type="button">Review</button></td><td><strong>${esc(r.symbol)}</strong></td><td>${esc(isoDate(r.expiry))}</td><td>${esc(r.dte)}</td><td>${money(r.spot)}</td><td>${esc(r.shortPut)}</td><td>${esc(r.longPut)}</td><td>${esc(r.shortCall)}</td><td>${esc(r.longCall)}</td><td>${money(r.requestedWidth)}</td><td>${percent(r.anchorPutOTM)}</td><td>${percent(r.anchorCallOTM)}</td><td>${percent(r.lowerAnchorPOTM)}</td><td>${money(r.naturalCredit)}</td><td>${money(r.midpointCredit)}</td><td>${money(r.displayedCredit)}</td><td>${percent(r.grossROC)}</td><td>${percent(r.rocAfterCommissionAndFees)}</td><td>${percent(r.monthlyChainIV)}</td><td>${whole(r.openInterest)}</td><td>${whole(r.shortPutOI)}</td><td>${whole(r.shortCallOI)}</td><td>${money(r.spreadMax)}</td><td>${r.expectedMove === null || r.expectedMove === undefined ? '—' : '±' + money(r.expectedMove)}</td><td class="${emClass}">${esc(r.expectedMoveStatus)}</td><td>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</td><td class="${strikeClass}">${esc(r.strikeValidationStatus)}<div class="recovered-source-note">${esc(r.strikeValidationReason)}</div></td><td>${esc(r.reviewStatus)}<div class="recovered-source-note">Educational review only; not a recommendation.</div></td></tr>`; }).join('');
+    body.innerHTML = shownRows.map((r,i) => { const strikeClass = r.strikeValidationStatus === 'PASS' ? 'strike-pass' : 'strike-rejected'; const em = String(r.expectedMoveStatus || '').toLowerCase(); const emClass = em.includes('outside') ? 'em-out' : em.includes('inside') ? 'em-in' : em.includes('near') ? 'em-near' : 'warn'; return `<tr data-index="${i}"><td><button class="sandbox-review-btn" type="button">Review</button></td><td><strong>${esc(r.symbol)}</strong></td><td>${esc(isoDate(r.expiry))}</td><td>${esc(r.dte)}</td><td>${money(r.spot)}</td><td>${esc(r.shortPut)}</td><td>${esc(r.longPut)}</td><td>${esc(r.shortCall)}</td><td>${esc(r.longCall)}</td><td>${money(r.requestedWidth)}</td><td>${percent(r.anchorPutOTM)}</td><td>${percent(r.anchorCallOTM)}</td><td>${percent(r.lowerAnchorPOTM)}</td><td>${money(r.naturalCredit)}</td><td>${money(r.midpointCredit)}</td><td>${money(r.displayedCredit)}</td><td>${percent(r.grossROC)}</td><td>${percent(r.rocAfterCommissionAndFees)}</td><td>${percent(r.monthlyChainIV)}</td><td>${whole(r.openInterest)}</td><td>${whole(r.shortPutOI)}</td><td>${whole(r.shortCallOI)}</td><td>${money(r.spreadMax)}</td><td>${r.expectedMove == null ? '—' : '±' + money(r.expectedMove)}</td><td class="${emClass}">${esc(r.expectedMoveStatus)}</td><td>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</td><td class="${strikeClass}">${esc(r.strikeValidationStatus)}<div class="recovered-source-note">${esc(r.strikeValidationReason)}</div></td><td>${esc(r.reviewStatus)}<div class="recovered-source-note">Educational review only; not a recommendation.</div></td></tr>`; }).join('');
     body.querySelectorAll('tr[data-index]').forEach(tr => tr.addEventListener('click', () => selectRow(Number(tr.dataset.index))));
     selectRow(0);
   }
 
-  function candidateTicketTarget() { if (byId('liveCandidateTicketContent')) return byId('liveCandidateTicketContent'); const heading = Array.from(document.querySelectorAll('h1,h2,h3')).find(h => /candidate ticket/i.test(h.textContent || '')); if (!heading) return null; const panel = heading.closest('.panel') || heading.parentElement; if (!panel) return null; const oldNote = Array.from(panel.querySelectorAll('.note')).find(n => /run a scan/i.test(n.textContent || '')); if (oldNote) oldNote.remove(); const target = document.createElement('div'); target.id = 'liveCandidateTicketContent'; target.className = 'ticket-live-grid'; heading.insertAdjacentElement('afterend', target); return target; }
-  function graphTarget() { if (byId('liveStrikeGraph')) return byId('liveStrikeGraph'); const ticket = candidateTicketTarget(); const panel = ticket && (ticket.closest('.panel') || ticket.parentElement); if (!panel) return null; const graph = document.createElement('div'); graph.id = 'liveStrikeGraph'; graph.innerHTML = '<p class="eyebrow">Strike Graph</p><h2 class="title">Condor strike map</h2><div class="note"><strong>Select a candidate</strong> to visualize long/short strikes, spot, and expected-move range.</div>'; panel.insertAdjacentElement('afterend', graph); return graph; }
-  function clearTicket() { const html = '<div class="ticket-live-item warn"><span>Status</span><strong>Run a scan, then select a candidate.</strong></div>'; const target = candidateTicketTarget(); if (target) target.innerHTML = html; const recovered = byId('recoveredTicketContent'); if (recovered) recovered.innerHTML = '<div class="recovered-ticket-item"><span>Status</span><strong>Run a scan, then select a candidate.</strong></div>'; }
+  function candidateTicketTarget() {
+    if (byId('liveCandidateTicketContent')) return byId('liveCandidateTicketContent');
+    const heading = Array.from(document.querySelectorAll('h1,h2,h3')).find(h => /candidate ticket/i.test(h.textContent || ''));
+    if (!heading) return null;
+    const panel = heading.closest('.panel') || heading.parentElement;
+    if (!panel) return null;
+    Array.from(panel.querySelectorAll('.note')).forEach(n => { if (/run a scan/i.test(n.textContent || '')) n.remove(); });
+    heading.style.display = 'none';
+    const target = document.createElement('div');
+    target.id = 'liveCandidateTicketContent';
+    panel.appendChild(target);
+    return target;
+  }
+  function graphTarget() { if (byId('liveStrikeGraph')) return byId('liveStrikeGraph'); const ticket = candidateTicketTarget(); const panel = ticket && (ticket.closest('.panel') || ticket.parentElement); if (!panel) return null; const graph = document.createElement('div'); graph.id = 'liveStrikeGraph'; panel.insertAdjacentElement('afterend', graph); return graph; }
+  function clearTicket() { const target = candidateTicketTarget(); if (target) target.innerHTML = '<p class="eyebrow">Order Ticket Preview</p><div class="ticket-card-title">Candidate Review</div><div class="ticket-card-note">Run a scan, then select a candidate.</div>'; }
   function clearGraph() { const target = graphTarget(); if (target) target.innerHTML = '<p class="eyebrow">Strike Graph</p><h2 class="title">Condor strike map</h2><div class="note"><strong>Run a scan, then select a candidate.</strong></div>'; }
 
   function ticketHtml(r) {
-    const status = r.strikeValidationStatus === 'PASS' ? 'Candidate loaded' : r.strikeValidationStatus;
-    return `<div class="ticket-live-item"><span>Symbol</span><strong>${esc(r.symbol)}</strong></div><div class="ticket-live-item"><span>Expiration / DTE</span><strong>${esc(isoDate(r.expiry))} · ${esc(r.dte)} DTE</strong></div><div class="ticket-live-item"><span>Spot</span><strong>${money(r.spot)}</strong></div><div class="ticket-live-item warn"><span>Status</span><strong>${esc(status)}</strong></div><div class="ticket-live-item sell"><span>Sell Put</span><strong>${esc(r.shortPut)}</strong></div><div class="ticket-live-item buy"><span>Buy Put</span><strong>${esc(r.longPut)}</strong></div><div class="ticket-live-item sell"><span>Sell Call</span><strong>${esc(r.shortCall)}</strong></div><div class="ticket-live-item buy"><span>Buy Call</span><strong>${esc(r.longCall)}</strong></div><div class="ticket-live-item"><span>Width</span><strong>${money(r.requestedWidth)}</strong></div><div class="ticket-live-item"><span>Displayed Credit</span><strong>${money(r.displayedCredit)}</strong></div><div class="ticket-live-item"><span>ROC After Costs</span><strong>${percent(r.rocAfterCommissionAndFees)}</strong></div><div class="ticket-live-item"><span>Lower Anchor P(OTM)</span><strong>${percent(r.lowerAnchorPOTM)}</strong></div><div class="ticket-live-item"><span>Put Anchor P(OTM)</span><strong>${percent(r.anchorPutOTM)}</strong></div><div class="ticket-live-item"><span>Call Anchor P(OTM)</span><strong>${percent(r.anchorCallOTM)}</strong></div><div class="ticket-live-item"><span>Monthly OI</span><strong>${whole(r.openInterest)}</strong></div><div class="ticket-live-item"><span>Max B/A Spread</span><strong>${money(r.spreadMax)}</strong></div><div class="ticket-live-item"><span>Expected Move</span><strong>${r.expectedMove == null ? '—' : '±' + money(r.expectedMove)}</strong></div><div class="ticket-live-item"><span>EM Status</span><strong>${esc(r.expectedMoveStatus)}</strong></div><div class="ticket-live-item"><span>Earnings</span><strong>${esc(r.earningsDate ? 'Earnings ' + isoDate(r.earningsDate) : r.earnings === false ? 'Clear' : 'Verify')}</strong></div><div class="ticket-live-item"><span>Review</span><strong>${esc(r.reviewStatus)}</strong></div>`;
+    return `<p class="eyebrow">Order Ticket Preview</p><div class="ticket-card-title">${esc(r.symbol)} Candidate Review</div><div class="ticket-card-note">Educational review only; verify pricing, liquidity, earnings, and risk independently.</div><div class="ticket-live-grid"><div class="ticket-live-item anchor"><span>Short Put</span><strong>${esc(r.shortPut)}</strong></div><div class="ticket-live-item offset"><span>Long Put</span><strong>${esc(r.longPut)}</strong></div><div class="ticket-live-item anchor"><span>Short Call</span><strong>${esc(r.shortCall)}</strong></div><div class="ticket-live-item offset"><span>Long Call</span><strong>${esc(r.longCall)}</strong></div></div><div class="ticket-math-grid"><div class="ticket-live-item small"><span>Credit</span><strong>${money(r.displayedCredit)}</strong></div><div class="ticket-live-item small"><span>Max Risk</span><strong>${money(r.maxRiskAfterCosts)}</strong></div><div class="ticket-live-item small"><span>ROC</span><strong>${percent(r.grossROC)}</strong></div><div class="ticket-live-item small"><span>ROC After Cost</span><strong>${percent(r.rocAfterCommissionAndFees)}</strong></div><div class="ticket-live-item small"><span>Lower Anchor P(OTM)</span><strong>${percent(r.lowerAnchorPOTM)}</strong></div><div class="ticket-live-item small anchor"><span>Put Anchor P(OTM)</span><strong>${percent(r.anchorPutOTM)}</strong></div><div class="ticket-live-item small anchor"><span>Call Anchor P(OTM)</span><strong>${percent(r.anchorCallOTM)}</strong></div><div class="ticket-live-item small"><span>DTE</span><strong>${esc(r.dte)}</strong></div><div class="ticket-live-item small"><span>Spot</span><strong>${money(r.spot)}</strong></div><div class="ticket-live-item small"><span>EM Status</span><strong>${esc(r.expectedMoveStatus)}</strong></div></div>`;
   }
 
   function updateGraph(r) {
@@ -145,16 +163,11 @@
     const pos = v => Math.max(6, Math.min(94, 6 + ((num(v, min) - min) / (max - min)) * 88));
     const profitLeft = pos(r.shortPut), profitRight = pos(r.shortCall);
     const emLeft = spot !== null ? pos(spot - move) : 0, emRight = spot !== null ? pos(spot + move) : 0;
-    const markers = [['LP', r.longPut, 'buy'], ['SP', r.shortPut, 'put'], ['Spot', r.spot, 'spot'], ['SC', r.shortCall, 'call'], ['LC', r.longCall, 'buy']]
-      .map(([label, value, cls]) => `<div class="live-marker ${cls}" style="left:${pos(value)}%"><span>${label} ${money(value)}</span></div>`).join('');
-    target.innerHTML = `<p class="eyebrow">Strike Graph</p><h2 class="title">${esc(r.symbol)} condor strike map</h2><div class="live-graph"><div class="live-axis"></div><div class="live-profit-zone" style="left:${profitLeft}%;width:${Math.max(1, profitRight-profitLeft)}%"></div>${move > 0 && spot !== null ? `<div class="live-em-zone" style="left:${Math.min(emLeft, emRight)}%;width:${Math.max(1, Math.abs(emRight-emLeft))}%"></div>` : ''}${markers}<div class="live-scale"><span>${money(min)}</span><span>${money(max)}</span></div></div><div class="live-graph-meta"><div><span>Put Wing</span><strong>${esc(r.longPut)} / ${esc(r.shortPut)}</strong></div><div><span>Call Wing</span><strong>${esc(r.shortCall)} / ${esc(r.longCall)}</strong></div><div><span>Expected Move</span><strong>${move > 0 ? '±' + money(move) : '—'}</strong></div><div><span>EM Status</span><strong>${esc(r.expectedMoveStatus)}</strong></div></div><div class="live-graph-note"><b>Green band:</b> short-strike range. <b>Amber band:</b> expected-move range. Educational visualization only.</div>`;
+    const markers = [['LP', r.longPut, 'buy'], ['SP', r.shortPut, 'put'], ['Spot', r.spot, 'spot'], ['SC', r.shortCall, 'call'], ['LC', r.longCall, 'buy']].map(([label, value, cls]) => `<div class="live-marker ${cls}" style="left:${pos(value)}%"><span>${label} ${money(value)}</span></div>`).join('');
+    target.innerHTML = `<p class="eyebrow">Strike Graph</p><h2 class="title">${esc(r.symbol)} condor strike map</h2><div class="live-graph"><div class="live-axis"></div><div class="live-profit-zone" style="left:${profitLeft}%;width:${Math.max(1, profitRight-profitLeft)}%"></div>${move > 0 && spot !== null ? `<div class="live-em-zone" style="left:${Math.min(emLeft, emRight)}%;width:${Math.max(1, Math.abs(emRight-emLeft))}%"></div>` : ''}${markers}<div class="live-scale"><span>${money(min)}</span><span>${money(max)}</span></div></div><div class="live-graph-meta"><div><span>Put Wing</span><strong>${esc(r.longPut)} / ${esc(r.shortPut)}</strong></div><div><span>Call Wing</span><strong>${esc(r.shortCall)} / ${esc(r.longCall)}</strong></div><div><span>Expected Move</span><strong>${move > 0 ? '±' + money(move) : '—'}</strong></div><div><span>EM Status</span><strong>${esc(r.expectedMoveStatus)}</strong></div></div><div class="live-graph-note"><b>Red markers:</b> anchor short strikes. <b>Green markers:</b> offset long strikes. Educational visualization only.</div>`;
   }
 
-  function selectRow(index) {
-    const r = shownRows[index]; if (!r) return;
-    const body = byId('resultsBody'); if (body) { body.querySelectorAll('tr').forEach(tr => tr.classList.remove('row-active')); const active = body.querySelector(`tr[data-index="${index}"]`); if (active) active.classList.add('row-active'); }
-    const html = ticketHtml(r); const target = candidateTicketTarget(); if (target) target.innerHTML = html; const recovered = byId('recoveredTicketContent'); if (recovered) recovered.innerHTML = html.replaceAll('ticket-live-item', 'recovered-ticket-item'); updateGraph(r);
-  }
+  function selectRow(index) { const r = shownRows[index]; if (!r) return; const body = byId('resultsBody'); if (body) { body.querySelectorAll('tr').forEach(tr => tr.classList.remove('row-active')); const active = body.querySelector(`tr[data-index="${index}"]`); if (active) active.classList.add('row-active'); } const target = candidateTicketTarget(); if (target) target.innerHTML = ticketHtml(r); updateGraph(r); }
 
   async function load(more) {
     includeMoreRecords = Boolean(more); const status = byId('recoveredStatus'); if (status) status.textContent = includeMoreRecords ? 'Scanning for more records…' : 'Scanning live candidates…';
@@ -162,6 +175,6 @@
     catch (error) { rows = []; const body = byId('resultsBody'); if (status) status.textContent = 'Live candidate load failed'; if (body) body.innerHTML = `<tr><td colspan="28" class="empty">Unable to load live candidates from Netlify/Supabase: ${esc(error.message)}</td></tr>`; clearTicket(); clearGraph(); }
   }
 
-  function init() { addStyles(); setupRecoveredUI(); clearTicket(); clearGraph(); load(false); }
+  function init() { addStyles(); cosmeticCleanup(); setupRecoveredUI(); clearTicket(); clearGraph(); load(false); setTimeout(cosmeticCleanup, 500); setTimeout(cosmeticCleanup, 1500); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
