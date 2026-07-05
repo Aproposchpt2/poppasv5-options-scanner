@@ -37,6 +37,16 @@
         align-items: center;
         justify-content: center;
         transition: transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease;
+        cursor: pointer !important;
+        pointer-events: auto !important;
+        user-select: none;
+        position: relative;
+      }
+      #runScanBtn[disabled], #rescanBtn[disabled], #runScanBtn[aria-disabled="true"], #rescanBtn[aria-disabled="true"] {
+        cursor: pointer !important;
+        pointer-events: auto !important;
+        opacity: 1 !important;
+        filter: none !important;
       }
       #runScanBtn:hover {
         transform: translateY(-2px);
@@ -44,6 +54,22 @@
         background: linear-gradient(135deg,#ffffff,#3ee391) !important;
       }
       #runScanBtn:active { transform: translateY(1px) scale(.98); box-shadow: 0 0 12px rgba(62,227,145,.55); }
+      #runScanBtn.is-scanning {
+        cursor: progress !important;
+        box-shadow: 0 0 28px rgba(62,227,145,.46), inset 0 0 0 2px rgba(62,227,145,.28) !important;
+        background: linear-gradient(135deg,#ffffff,#3ee391) !important;
+      }
+      #runScanBtn.is-scanning::after {
+        content: '';
+        width: 12px;
+        height: 12px;
+        margin-left: 10px;
+        border: 2px solid rgba(4,16,31,.28);
+        border-top-color: rgba(4,16,31,.95);
+        border-radius: 999px;
+        animation: poppasSpin .75s linear infinite;
+      }
+      @keyframes poppasSpin { to { transform: rotate(360deg); } }
       #rescanBtn:hover { transform: translateY(-2px); border-color: rgba(62,227,145,.72) !important; box-shadow: 0 0 18px rgba(62,227,145,.18); }
       #scanProgress {
         border-left: 5px solid var(--green) !important;
@@ -65,6 +91,28 @@
     const box = $('scanProgress');
     if (!box) return;
     box.innerHTML = '<span class="ok">' + sanitize(message) + '</span>';
+  }
+
+  function setCtaBusy(isBusy) {
+    const run = $('runScanBtn');
+    if (!run) return;
+    run.classList.toggle('is-scanning', Boolean(isBusy));
+    run.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+    run.removeAttribute('disabled');
+    run.setAttribute('aria-disabled', 'false');
+    run.style.cursor = isBusy ? 'progress' : 'pointer';
+    run.style.pointerEvents = 'auto';
+  }
+
+  function normalizeCtaState() {
+    ['runScanBtn', 'rescanBtn'].forEach(id => {
+      const button = $(id);
+      if (!button) return;
+      button.removeAttribute('disabled');
+      button.setAttribute('aria-disabled', 'false');
+      button.style.cursor = 'pointer';
+      button.style.pointerEvents = 'auto';
+    });
   }
 
   function restoreFaqAndFooter() {
@@ -109,24 +157,40 @@
     if (typeof originalRunScan === 'function') {
       window.runScan = async function () {
         userStartedScan = true;
+        normalizeCtaState();
+        setCtaBusy(true);
         greenMessage('Scanning: searching for qualifying Iron Condor candidates…');
-        const result = await originalRunScan.apply(window, arguments);
-        sanitizeVisibleText();
-        const displayed = (($('candidateCount') || {}).textContent || '').trim();
-        if (displayed && displayed !== '0' && displayed !== '—') greenMessage('Scan complete. Candidate results are ready for review. Select a row to update the ticket and green-box graph.');
-        return result;
+        try {
+          const result = await originalRunScan.apply(window, arguments);
+          sanitizeVisibleText();
+          const displayed = (($('candidateCount') || {}).textContent || '').trim();
+          if (displayed && displayed !== '0' && displayed !== '—') greenMessage('Scan complete. Candidate results are ready for review. Select a row to update the ticket and green-box graph.');
+          return result;
+        } finally {
+          setCtaBusy(false);
+          normalizeCtaState();
+        }
       };
     }
 
     const originalRescan = window.rescan;
     if (typeof originalRescan === 'function') {
-      window.rescan = async function () { userStartedScan = true; greenMessage('Scanning: searching for additional qualifying market candidates…'); const result = await originalRescan.apply(window, arguments); sanitizeVisibleText(); return result; };
+      window.rescan = async function () {
+        userStartedScan = true;
+        normalizeCtaState();
+        greenMessage('Scanning: searching for additional qualifying market candidates…');
+        const result = await originalRescan.apply(window, arguments);
+        sanitizeVisibleText();
+        normalizeCtaState();
+        return result;
+      };
     }
 
     const run = $('runScanBtn');
-    if (run && typeof window.runScan === 'function') { run.textContent = 'Scan Now'; run.onclick = event => { event.preventDefault(); window.runScan(); }; }
+    if (run && typeof window.runScan === 'function') { run.textContent = 'Scan Now'; run.onclick = event => { event.preventDefault(); normalizeCtaState(); window.runScan(); }; }
     const rescan = $('rescanBtn');
-    if (rescan && typeof window.rescan === 'function') { rescan.textContent = 'Scan For More Records'; rescan.onclick = event => { event.preventDefault(); window.rescan(); }; }
+    if (rescan && typeof window.rescan === 'function') { rescan.textContent = 'Scan For More Records'; rescan.onclick = event => { event.preventDefault(); normalizeCtaState(); window.rescan(); }; }
+    normalizeCtaState();
   }
 
   function hookControlsManualOnly() {
@@ -144,9 +208,13 @@
     hookControlsManualOnly();
     clearAutoRenderedBoard();
     sanitizeVisibleText();
+    normalizeCtaState();
     setTimeout(clearAutoRenderedBoard, 600);
     setTimeout(clearAutoRenderedBoard, 1800);
     setTimeout(restoreFaqAndFooter, 2000);
+    setTimeout(normalizeCtaState, 300);
+    setTimeout(normalizeCtaState, 1000);
+    setTimeout(normalizeCtaState, 2500);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
