@@ -141,9 +141,10 @@
     var emOut=d.em&&d.em.toLowerCase().indexOf('outside')!==-1;
     var emBadgeCls=emOut?'cv-bg':'cv-ba';
 
-    /* Prevent anchor label overlap: offset call label if too close to put label */
+    /* Prevent label overlap: offset call if close to put; offset Mark if close to either anchor */
     var putLabelAdj='top:0',callLabelAdj='top:0';
     if(Math.abs(cp-pp)<12){putLabelAdj='top:0';callLabelAdj='top:20px';}
+    var markAdj=(Math.abs(sp-pp)<11||Math.abs(sp-cp)<11)?'top:20px':'top:0';
 
     old.className='condor-viz';
     old.innerHTML=
@@ -178,11 +179,12 @@
           '<div class="cv-mk cv-ma" style="left:'+f(cp,3)+'%"></div>'+
           '<div class="cv-mk cv-ms" style="left:'+f(sp,3)+'%"></div>'+
         '</div>'+
-        /* Floating labels below */
-        (lp!==null?'<div class="cv-lb cv-el" style="left:'+f(lp,3)+'%;top:calc(68px + 8px)">EM Low<br>$'+f(low,2)+'</div>':'')+
-        '<div class="cv-lb" style="left:'+f(sp,3)+'%;top:calc(68px + 6px)">'+
-          '<div class="cv-sc"><strong>$'+f(d.spot,2)+'</strong><small>Spot</small></div>'+
+        /* Mark label above the track */
+        '<div class="cv-la" style="left:'+f(sp,3)+'%;'+markAdj+'">'+
+          '<div class="cv-sc"><strong>$'+f(d.spot,2)+'</strong><small>Mark</small></div>'+
         '</div>'+
+        /* EM boundary labels below the track */
+        (lp!==null?'<div class="cv-lb cv-el" style="left:'+f(lp,3)+'%;top:calc(68px + 8px)">EM Low<br>$'+f(low,2)+'</div>':'')+
         (hp!==null?'<div class="cv-lb cv-el" style="left:'+f(hp,3)+'%;top:calc(68px + 8px)">EM High<br>$'+f(high,2)+'</div>':'')+
       '</div>'+
       /* Stats strip */
