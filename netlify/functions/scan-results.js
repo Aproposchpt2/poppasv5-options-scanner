@@ -134,8 +134,22 @@ export default async (req) => {
       'natural_credit','midpoint_credit','displayed_credit','gross_roc','roc_after_commission_and_fees','anchor_put_otm','anchor_call_otm','lower_anchor_p_otm'
     ].join(',');
 
+    // Scope to latest completed scan run so Postgres uses scan_run_id-led indexes
+    // instead of a full 402k-row table scan (error 57014 statement timeout).
+    let runId = null;
+    try {
+      const runParams = new URLSearchParams();
+      runParams.set('select', 'id,completed_at');
+      runParams.set('status', 'eq.completed');
+      runParams.set('order', 'completed_at.desc');
+      runParams.set('limit', '1');
+      const runs = await supabaseRows(`scan_runs?${runParams.toString()}`);
+      runId = Array.isArray(runs) && runs[0] ? runs[0].id : null;
+    } catch (_) {}
+
     const params = new URLSearchParams();
     params.set('select', select);
+    if (runId) params.set('scan_run_id', `eq.${runId}`);
     params.set('raw_chain_eligible', 'eq.true');
     params.set('dte', 'gte.0');
     params.append('dte', 'lte.45');
