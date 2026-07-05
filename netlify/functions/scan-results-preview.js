@@ -12,7 +12,10 @@ export default async (req) => {
     const q = incoming.searchParams;
     const liveUrl = new URL('/.netlify/functions/scan-results', incoming.origin);
     liveUrl.searchParams.set('passersTop', 'true');
-    liveUrl.searchParams.set('limit', q.get('liveLimit') || q.get('limit') || '1000');
+
+    // Important: do not pass the public display limit into the live candidate pull.
+    // The live endpoint must return a full candidate pool first, then this preview endpoint slices for display.
+    liveUrl.searchParams.set('limit', q.get('liveLimit') || '1000');
 
     const liveResponse = await fetch(liveUrl.toString(), { headers: { Accept: 'application/json' } });
     const liveData = await liveResponse.json().catch(() => ({}));
@@ -58,7 +61,7 @@ export default async (req) => {
       nextOffset: hasMore ? offset + limit : null,
       filters: { dteMin: 0, dteMax: 45, minAnchorProbability: 80 },
       previewSlice: true,
-      processingMode: 'live-market-candidate-slice',
+      processingMode: 'live-market-candidate-pool-first-slice-second',
       filterMode: 'approved-strategy-filters',
       serverFiltersApplied: true,
       serverFiltersRemoved: false,
