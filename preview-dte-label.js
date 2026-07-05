@@ -1,4 +1,4 @@
-// DTE window display helper — locks the current value as the sole visible option.
+﻿// DTE window display helper — locks the current value as the sole visible option.
 (function(){
   function findDteField(){return document.getElementById('dteWindow')||document.getElementById('dteRange')||document.getElementById('dte');}
   function applyDteDisplay(){
@@ -111,6 +111,23 @@
       '.cv-emk-a{width:2px;background:var(--gold);box-shadow:0 0 8px rgba(213,174,85,.7);z-index:2}',
       '.cv-em-lbl{position:absolute;transform:translateX(-50%);top:calc(28px + 5px);text-align:center;white-space:nowrap;line-height:1.35;font-size:.62rem;color:rgba(123,220,255,.65)}',
       '.cv-em-lbl strong{display:block;color:var(--cyan);font-size:.72rem;font-weight:700}',
+      /* Five-Zone Strip (Frame 1) */
+      '.cv-fz-bar{position:relative;height:36px;border-radius:8px;overflow:hidden;border:1px solid rgba(191,214,255,.16);background:rgba(0,0,0,.4)}',
+      '.cv-fz-z{position:absolute;top:0;bottom:0}',
+      '.cv-fz-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}',
+      '.cv-fz-chip{font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;font-weight:900;border-radius:999px;padding:5px 12px;border:1px solid;white-space:nowrap}',
+      /* Margin Pair Gauges (Frame 3) */
+      '.cv-mg-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:start}',
+      '.cv-mg-bar{height:36px;border-radius:8px;overflow:hidden;border:1px solid rgba(191,214,255,.16);background:rgba(0,0,0,.4);position:relative}',
+      '.cv-mg-fill{position:absolute;top:0;bottom:0;left:0;border-radius:6px 0 0 6px}',
+      '.cv-mg-val{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:.88rem;font-weight:700;color:#fff}',
+      '.cv-mg-lbl{font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;font-weight:900;margin-bottom:8px}',
+      '.cv-mg-sub{display:flex;justify-content:space-between;margin-top:5px;font-size:.58rem;color:var(--muted)}',
+      '.cv-mg-badge{text-align:center;padding:8px 6px}',
+      '.cv-mg-big{font-family:var(--disp);font-size:1.9rem;color:#fff;font-weight:600;line-height:1}',
+      '.cv-mg-btxt{font-size:.54rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:4px}',
+      '.cv-mg-bsub{font-size:.68rem;color:var(--cyan);margin-top:4px}',
+      '@media(max-width:760px){.cv-mg-grid{grid-template-columns:1fr;gap:8px}.cv-mg-badge{display:flex;align-items:center;gap:12px;padding:4px 0}}',
       /* Responsive */
       /* ── 760px tablet / large phone ── */
       '@media(max-width:760px){',
@@ -189,6 +206,24 @@
     var ppOk=d.pp>=90,cpOk=d.cp>=90;
     var emOut=d.em&&d.em.toLowerCase().indexOf('outside')!==-1;
     var emBadgeCls=emOut?'cv-bg':'cv-ba';
+    /* Three-frame EM graph variables */
+    var lpPos=Number.isFinite(d.bp)?pos(d.bp,mn,mx):null;
+    var lcPos=Number.isFinite(d.bc)?pos(d.bc,mn,mx):null;
+    var putBuf=(low!==null&&Number.isFinite(d.sp))?(low-d.sp).toFixed(2):null;
+    var callBuf=(high!==null&&Number.isFinite(d.sc))?(d.sc-high).toFixed(2):null;
+    var fzChips='';
+    if(putBuf!==null||callBuf!==null){
+      fzChips='<div class="cv-fz-chips">';
+      if(putBuf!==null){var pbOk=parseFloat(putBuf)>0;fzChips+='<span class="cv-fz-chip" style="color:'+(pbOk?'var(--amber)':'var(--red)')+';border-color:'+(pbOk?'rgba(242,180,71,.4)':'rgba(255,105,105,.4)')+';background:'+(pbOk?'rgba(242,180,71,.08)':'rgba(255,105,105,.08)')+'">Put Buffer '+(pbOk?'$'+putBuf:'Inside EM ⚠')+'</span>';}
+      if(callBuf!==null){var cbOk=parseFloat(callBuf)>0;fzChips+='<span class="cv-fz-chip" style="color:'+(cbOk?'var(--green)':'var(--red)')+';border-color:'+(cbOk?'rgba(62,227,145,.4)':'rgba(255,105,105,.4)')+';background:'+(cbOk?'rgba(62,227,145,.08)':'rgba(255,105,105,.08)')+'">Call Buffer '+(cbOk?'$'+callBuf:'Inside EM ⚠')+'</span>';}
+      fzChips+='</div>';
+    }
+    var emRange=(low!==null&&high!==null&&high>low)?(high-low):null;
+    var spotInEM=emRange?Math.max(2,Math.min(98,(d.spot-low)/emRange*100)):50;
+    var scaleRef=25;
+    var putFill=putBuf!==null?Math.min(100,Math.max(0,parseFloat(putBuf)/scaleRef*100)):0;
+    var callFill=callBuf!==null?Math.min(100,Math.max(0,parseFloat(callBuf)/scaleRef*100)):0;
+    var spotPct=(Number.isFinite(d.sp)&&Number.isFinite(d.sc)&&d.sc>d.sp)?Math.round((d.spot-d.sp)/(d.sc-d.sp)*100):null;
 
     /* Prevent label overlap: offset call if close to put; offset Mark if close to either anchor */
     var putLabelAdj='top:0',callLabelAdj='top:0';
@@ -233,27 +268,71 @@
           '<div class="cv-sc"><strong>$'+f(d.spot,2)+'</strong><small>Mark</small></div>'+
         '</div>'+
       '</div>'+
-      /* EM bar section */
+      /* EM Graphs — Three Frames */
       '<div class="cv-em-div"></div>'+
-      '<div class="cv-em-sec">'+
-        '<div class="cv-em-hd">'+
-          '<span class="cv-em-ttl">Expected Move Range</span>'+
-          '<span class="cv-em-rng">'+(d.move?'± $'+f(d.move,2):'Verify')+'</span>'+
+      '<div class="cv-em-hd"><span class="cv-em-ttl">① Zone Map</span><span class="cv-em-rng">'+(d.move?'± $'+f(d.move,2):'Verify')+'</span></div>'+
+      '<div style="position:relative;padding-bottom:36px;margin-bottom:4px">'+
+        '<div class="cv-fz-bar">'+
+          (lpPos!==null?'<div class="cv-fz-z" style="left:0;width:'+f(Math.max(0,lpPos),3)+'%;background:rgba(255,80,80,.2)"></div>':'')+
+          (lpPos!==null?'<div class="cv-fz-z" style="left:'+f(lpPos,3)+'%;width:'+f(Math.max(0,pp-lpPos),3)+'%;background:rgba(242,130,50,.28)"></div>':'')+
+          (lp!==null?'<div class="cv-fz-z" style="left:'+f(pp,3)+'%;width:'+f(Math.max(0,lp-pp),3)+'%;background:rgba(213,174,85,.45)"></div>':'')+
+          (lp!==null&&hp!==null?'<div class="cv-fz-z" style="left:'+f(lp,3)+'%;width:'+f(Math.max(0,hp-lp),3)+'%;background:rgba(123,220,255,.2);border-left:1px solid rgba(123,220,255,.5);border-right:1px solid rgba(123,220,255,.5)"></div>':'')+
+          (hp!==null?'<div class="cv-fz-z" style="left:'+f(hp,3)+'%;width:'+f(Math.max(0,cp-hp),3)+'%;background:rgba(213,174,85,.45)"></div>':'')+
+          (lcPos!==null?'<div class="cv-fz-z" style="left:'+f(cp,3)+'%;width:'+f(Math.max(0,lcPos-cp),3)+'%;background:rgba(242,130,50,.28)"></div>':'')+
+          (lcPos!==null?'<div class="cv-fz-z" style="left:'+f(lcPos,3)+'%;width:'+f(Math.max(0,100-lcPos),3)+'%;background:rgba(255,80,80,.2)"></div>':'')+
+          (lp!==null?'<div class="cv-emk" style="left:'+f(lp,3)+'%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>':'')+
+          (hp!==null?'<div class="cv-emk" style="left:'+f(hp,3)+'%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>':'')+
+          '<div class="cv-emk cv-emk-a" style="left:'+f(pp,3)+'%"></div>'+
+          '<div class="cv-emk cv-emk-a" style="left:'+f(cp,3)+'%"></div>'+
+          '<div class="cv-emk cv-emk-s" style="left:'+f(sp,3)+'%"></div>'+
         '</div>'+
-        '<div class="cv-em-wrap">'+
-          '<div class="cv-em-bar">'+
-            (lp!==null?'<div class="cv-em-out" style="left:0;width:'+f(Math.max(0,lp),3)+'%"></div>':'')+
-            (lp!==null&&hp!==null?'<div class="cv-em-in" style="left:'+f(Math.max(0,lp),3)+'%;width:'+f(Math.max(0,hp-lp),3)+'%"></div>':'')+
-            (hp!==null?'<div class="cv-em-out" style="left:'+f(Math.max(0,hp),3)+'%;width:'+f(Math.max(0,100-hp),3)+'%"></div>':'')+
-            '<div class="cv-emk cv-emk-a" style="left:'+f(pp,3)+'%"></div>'+
-            '<div class="cv-emk cv-emk-a" style="left:'+f(cp,3)+'%"></div>'+
-            '<div class="cv-emk cv-emk-s" style="left:'+f(sp,3)+'%"></div>'+
+        (lp!==null&&Number.isFinite(d.sp)?'<div class="cv-em-lbl" style="left:'+f(Math.max(3,pp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sp,2)+'</strong>Short Put</div>':'')+
+        (lp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(4,Math.min(91,lp)),3)+'%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>':'')+
+        '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,sp)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Spot</div>'+
+        (hp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(9,Math.min(96,hp)),3)+'%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>':'')+
+        (hp!==null&&Number.isFinite(d.sc)?'<div class="cv-em-lbl" style="left:'+f(Math.min(97,cp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sc,2)+'</strong>Short Call</div>':'')+
+      '</div>'+
+      fzChips+
+      '<div class="cv-em-div" style="margin-top:16px"></div>'+
+      '<div class="cv-em-hd"><span class="cv-em-ttl">② EM Frame</span><span class="cv-em-rng">'+(emRange?'EM span $'+f(emRange,2):'Verify')+'</span></div>'+
+      (emRange?
+        '<div style="position:relative;padding-bottom:36px;margin-bottom:10px">'+
+          '<div style="position:relative;height:36px;border-radius:8px;overflow:hidden;border:1px solid rgba(123,220,255,.45);background:linear-gradient(90deg,rgba(123,220,255,.06),rgba(123,220,255,.22),rgba(123,220,255,.06))">'+
+            '<div class="cv-emk" style="left:.5%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>'+
+            '<div class="cv-emk" style="left:99.5%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>'+
+            '<div class="cv-emk cv-emk-s" style="left:'+f(spotInEM,3)+'%"></div>'+
           '</div>'+
-          (lp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(2,lp),3)+'%"><strong>$'+f(low,2)+'</strong>EM Low</div>':'')+
-          (hp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.min(98,hp),3)+'%"><strong>$'+f(high,2)+'</strong>EM High</div>':'')+
+          '<div class="cv-em-lbl" style="left:2%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>'+
+          '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,spotInEM)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Spot</div>'+
+          '<div class="cv-em-lbl" style="left:98%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">'+
+          (putBuf!==null?'<div style="border:1px solid rgba(213,174,85,.35);border-radius:10px;padding:10px 12px;background:rgba(213,174,85,.06)"><div style="font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:900;margin-bottom:3px">Put Buffer</div><div style="font-size:1.05rem;color:var(--amber);font-weight:700">$'+putBuf+'</div><div style="font-size:.6rem;color:var(--muted)">SP $'+f(d.sp,2)+' $'+putBuf+' below EM Low</div></div>':'')+
+          (callBuf!==null?'<div style="border:1px solid rgba(62,227,145,.35);border-radius:10px;padding:10px 12px;background:rgba(62,227,145,.06)"><div style="font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:var(--green);font-weight:900;margin-bottom:3px">Call Buffer</div><div style="font-size:1.05rem;color:var(--green);font-weight:700">$'+callBuf+'</div><div style="font-size:.6rem;color:var(--muted)">SC $'+f(d.sc,2)+' $'+callBuf+' above EM High</div></div>':'')+
+        '</div>'
+      :
+        '<div style="font-size:.72rem;color:var(--muted);padding:8px 0">EM data unavailable.</div>'
+      )+
+      '<div class="cv-em-div" style="margin-top:10px"></div>'+
+      '<div class="cv-em-hd"><span class="cv-em-ttl">③ Buffer Gauges</span><span class="cv-em-rng">'+(spotPct!==null?spotPct+'% spot in zone':'—')+'</span></div>'+
+      '<div class="cv-mg-grid">'+
+        '<div>'+
+          '<div class="cv-mg-lbl" style="color:var(--amber)">Put Buffer</div>'+
+          '<div class="cv-mg-bar"><div class="cv-mg-fill" style="width:'+f(putFill,1)+'%;background:linear-gradient(90deg,rgba(242,180,71,.7),rgba(242,180,71,.35))"></div><div class="cv-mg-val">'+(putBuf!==null?'$'+putBuf:'—')+'</div></div>'+
+          '<div class="cv-mg-sub"><span style="color:var(--gold)">SP $'+f(d.sp,2)+'</span><span style="color:var(--cyan)">EM Low $'+f(low,2)+'</span></div>'+
+        '</div>'+
+        '<div class="cv-mg-badge">'+
+          '<div class="cv-mg-big">'+(spotPct!==null?spotPct+'%':'—')+'</div>'+
+          '<div class="cv-mg-btxt">Spot in profit zone</div>'+
+          '<div class="cv-mg-bsub">$'+f(d.spot,2)+'</div>'+
+        '</div>'+
+        '<div>'+
+          '<div class="cv-mg-lbl" style="color:var(--green)">Call Buffer</div>'+
+          '<div class="cv-mg-bar"><div class="cv-mg-fill" style="width:'+f(callFill,1)+'%;background:linear-gradient(90deg,rgba(62,227,145,.7),rgba(62,227,145,.35))"></div><div class="cv-mg-val">'+(callBuf!==null?'$'+callBuf:'—')+'</div></div>'+
+          '<div class="cv-mg-sub"><span style="color:var(--cyan)">EM High $'+f(high,2)+'</span><span style="color:var(--gold)">SC $'+f(d.sc,2)+'</span></div>'+
         '</div>'+
       '</div>'+
-      /* Stats strip */
+            /* Stats strip */
       '<div class="cv-ss">'+
         '<div class="cv-st"><div class="cv-sl">Net Credit</div><div class="cv-sv">'+(d.credit||'—')+'</div></div>'+
         '<div class="cv-st"><div class="cv-sl">ROC</div><div class="cv-sv">'+(d.roc||'—')+'</div></div>'+
