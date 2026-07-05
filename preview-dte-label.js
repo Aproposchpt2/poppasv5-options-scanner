@@ -97,7 +97,40 @@
       '.cv-pf{height:100%;border-radius:999px;transition:.4s}.cv-pf.ok{background:var(--green)}.cv-pf.lo{background:var(--amber)}',
       '.cv-px{position:absolute;top:-3px;width:2px;height:12px;background:rgba(255,255,255,.5);border-radius:1px;left:90%}',
       /* Responsive */
-      '@media(max-width:760px){.cv-ss{grid-template-columns:1fr 1fr}.cv-pr{grid-template-columns:1fr}.cv-pn{font-size:1.8rem}}'
+      /* ── 760px tablet / large phone ── */
+      '@media(max-width:760px){',
+        '.condor-viz{padding:14px 14px;}',
+        '.cv-hd{gap:8px;margin-bottom:12px}',
+        '.cv-ti{font-size:1.1rem}',
+        '.cv-ti em{display:block;margin-left:0;margin-top:3px}',
+        '.cv-bd{gap:5px}',
+        '.cv-b{font-size:.56rem;padding:4px 9px}',
+        '.cv-tw{padding:26px 0 36px}',
+        '.cv-tr{height:54px}',
+        '.cv-ac,.cv-sc{padding:3px 8px}',
+        '.cv-ac strong,.cv-sc strong{font-size:.74rem}',
+        '.cv-ac small,.cv-sc small{font-size:.5rem}',
+        '.cv-zt{font-size:.44rem;letter-spacing:.1em}',
+        '.cv-el{font-size:.54rem}',
+        '.cv-ss{grid-template-columns:1fr 1fr;gap:6px}',
+        '.cv-st{padding:8px 10px}',
+        '.cv-sl{font-size:.54rem}',
+        '.cv-sv{font-size:.9rem}',
+        '.cv-pr{grid-template-columns:1fr;gap:8px}',
+        '.cv-pc{padding:10px 12px;gap:10px}',
+        '.cv-pn{font-size:1.7rem;min-width:60px}',
+        '.cv-pg{font-size:.62rem}',
+        '.cv-pk{font-size:.8rem}',
+      '}',
+      /* ── 420px small phone ── */
+      '@media(max-width:420px){',
+        '.cv-tw{padding:24px 0 8px}',
+        '.cv-el{display:none}',
+        '.cv-zt{display:none}',
+        '.cv-ti{font-size:1rem}',
+        '.cv-pn{font-size:1.5rem;min-width:52px}',
+        '.cv-ss{grid-template-columns:1fr 1fr}',
+      '}'
     ].join('');
     document.head.appendChild(s);
   }
