@@ -50,11 +50,11 @@
         border-color: rgba(62,227,145,.42) !important;
         background: linear-gradient(90deg, rgba(62,227,145,.16), rgba(62,227,145,.05)) !important;
         color: var(--green) !important;
-        font-weight: 700 !important;
+        font-weight: 400 !important;
         font-style: italic !important;
         text-shadow: 0 0 18px rgba(62,227,145,.24);
       }
-      #scanProgress strong, #scanProgress .ok, #scanProgress span { color: var(--green) !important; font-style: italic !important; }
+      #scanProgress strong, #scanProgress .ok, #scanProgress span { color: var(--green) !important; font-weight: 400 !important; font-style: italic !important; }
       #ticketBox .viz, #ticketBox .bar, #ticketBox .gauge, #ticketBox .fill { visibility: visible !important; opacity: 1 !important; }
       .poppas-footer-brand{width:100%;text-align:center;font-family:var(--disp);font-size:2.25rem;line-height:1.15;color:#fff;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.poppas-footer-brand span{display:block;margin-top:8px;font-family:var(--body);font-size:1rem;letter-spacing:.22em;color:var(--gold);font-weight:900}
     `;
@@ -64,7 +64,7 @@
   function greenMessage(message) {
     const box = $('scanProgress');
     if (!box) return;
-    box.innerHTML = '<strong>Status:</strong> <span class="ok">' + sanitize(message) + '</span>';
+    box.innerHTML = '<span class="ok">' + sanitize(message) + '</span>';
   }
 
   function restoreFaqAndFooter() {
