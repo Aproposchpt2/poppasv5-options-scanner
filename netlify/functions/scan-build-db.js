@@ -9,8 +9,8 @@ export default async () => json({
   ok: false,
   available: false,
   function: "scan-build-db",
-  environment: "poppasv4-development-clone",
-  reason: "Legacy builder is not used in the v4 development architecture.",
+  environment: "poppasv5-options-scanner",
+  reason: "Legacy builder is not used in the v5 architecture.",
   replacement: "scan-ingest-schwab-db plus Supabase PostgreSQL RPC",
   productionV3Affected: false
 });

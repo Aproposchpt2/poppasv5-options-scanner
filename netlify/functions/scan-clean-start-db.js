@@ -9,8 +9,8 @@ export default async () => json({
   ok: false,
   available: false,
   function: "scan-clean-start-db",
-  environment: "poppasv4-development-clone",
-  reason: "This route is not used in the v4 development architecture.",
+  environment: "poppasv5-options-scanner",
+  reason: "This route is not used in the v5 architecture.",
   cleanupPerformed: false,
   productionV3Affected: false
 });

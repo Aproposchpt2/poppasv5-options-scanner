@@ -7,7 +7,7 @@ import scanBuildDb from "./scan-build-db.js";
 const MAX_ORCHESTRATOR_MS = 13 * 60 * 1000;
 const CONTINUATION_BUFFER_MS = 45 * 1000;
 const LOOP_DELAY_MS = 350;
-const FALLBACK_SITE_URL = "https://poppasv2.ai4academy.net";
+const FALLBACK_SITE_URL = "https://poppasv5os.ai4academy.net";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
