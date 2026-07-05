@@ -52,7 +52,7 @@
       '.cv-bc{color:var(--cyan);border-color:rgba(123,220,255,.4);background:rgba(123,220,255,.1)}',
       '.cv-ba{color:var(--amber);border-color:rgba(242,180,71,.4);background:rgba(242,180,71,.1)}',
       /* Track wrapper with room for floating labels */
-      '.cv-tw{position:relative;padding:34px 0 50px;margin:0 2px}',
+      '.cv-tw{position:relative;padding:34px 0 10px;margin:0 2px}',
       /* Track bar */
       '.cv-tr{position:relative;height:68px;border-radius:10px;overflow:hidden;border:1px solid rgba(191,214,255,.16);background:rgba(0,0,0,.4);box-shadow:inset 0 2px 18px rgba(0,0,0,.5)}',
       '.cv-z{position:absolute;top:0;bottom:0;display:flex;align-items:flex-end;padding-bottom:7px}',
@@ -96,6 +96,21 @@
       '.cv-pt{height:6px;background:rgba(255,255,255,.14);border-radius:999px;margin-top:9px;position:relative}',
       '.cv-pf{height:100%;border-radius:999px;transition:.4s}.cv-pf.ok{background:var(--green)}.cv-pf.lo{background:var(--amber)}',
       '.cv-px{position:absolute;top:-3px;width:2px;height:12px;background:rgba(255,255,255,.5);border-radius:1px;left:90%}',
+      /* EM bar section */
+      '.cv-em-div{height:1px;background:var(--line);margin:14px 0 12px}',
+      '.cv-em-sec{margin-bottom:14px}',
+      '.cv-em-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}',
+      '.cv-em-ttl{font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);font-weight:900}',
+      '.cv-em-rng{font-size:.72rem;color:rgba(235,242,255,.72);font-weight:700}',
+      '.cv-em-wrap{position:relative;padding-bottom:30px}',
+      '.cv-em-bar{position:relative;height:28px;border-radius:8px;overflow:hidden;border:1px solid rgba(123,220,255,.18);background:rgba(0,0,0,.35)}',
+      '.cv-em-out{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.05)}',
+      '.cv-em-in{position:absolute;top:0;bottom:0;background:linear-gradient(90deg,rgba(123,220,255,.1),rgba(123,220,255,.26),rgba(123,220,255,.1));border-left:1px solid rgba(123,220,255,.5);border-right:1px solid rgba(123,220,255,.5)}',
+      '.cv-emk{position:absolute;top:-2px;bottom:-2px;border-radius:1px}',
+      '.cv-emk-s{width:3px;background:#fff;box-shadow:0 0 10px rgba(123,220,255,.8);z-index:3}',
+      '.cv-emk-a{width:2px;background:var(--gold);box-shadow:0 0 8px rgba(213,174,85,.7);z-index:2}',
+      '.cv-em-lbl{position:absolute;transform:translateX(-50%);top:calc(28px + 5px);text-align:center;white-space:nowrap;line-height:1.35;font-size:.62rem;color:rgba(123,220,255,.65)}',
+      '.cv-em-lbl strong{display:block;color:var(--cyan);font-size:.72rem;font-weight:700}',
       /* Responsive */
       /* ── 760px tablet / large phone ── */
       '@media(max-width:760px){',
@@ -105,7 +120,8 @@
         '.cv-ti em{display:block;margin-left:0;margin-top:3px}',
         '.cv-bd{gap:5px}',
         '.cv-b{font-size:.56rem;padding:4px 9px}',
-        '.cv-tw{padding:26px 0 36px}',
+        '.cv-tw{padding:26px 0 8px}',
+        '.cv-em-wrap{padding-bottom:26px}',
         '.cv-tr{height:54px}',
         '.cv-ac,.cv-sc{padding:3px 8px}',
         '.cv-ac strong,.cv-sc strong{font-size:.74rem}',
@@ -216,9 +232,26 @@
         '<div class="cv-la" style="left:'+f(sp,3)+'%;'+markAdj+'">'+
           '<div class="cv-sc"><strong>$'+f(d.spot,2)+'</strong><small>Mark</small></div>'+
         '</div>'+
-        /* EM boundary labels below the track */
-        (lp!==null?'<div class="cv-lb cv-el" style="left:'+f(lp,3)+'%;top:calc(68px + 8px)">EM Low<br>$'+f(low,2)+'</div>':'')+
-        (hp!==null?'<div class="cv-lb cv-el" style="left:'+f(hp,3)+'%;top:calc(68px + 8px)">EM High<br>$'+f(high,2)+'</div>':'')+
+      '</div>'+
+      /* EM bar section */
+      '<div class="cv-em-div"></div>'+
+      '<div class="cv-em-sec">'+
+        '<div class="cv-em-hd">'+
+          '<span class="cv-em-ttl">Expected Move Range</span>'+
+          '<span class="cv-em-rng">'+(d.move?'± $'+f(d.move,2):'Verify')+'</span>'+
+        '</div>'+
+        '<div class="cv-em-wrap">'+
+          '<div class="cv-em-bar">'+
+            (lp!==null?'<div class="cv-em-out" style="left:0;width:'+f(Math.max(0,lp),3)+'%"></div>':'')+
+            (lp!==null&&hp!==null?'<div class="cv-em-in" style="left:'+f(Math.max(0,lp),3)+'%;width:'+f(Math.max(0,hp-lp),3)+'%"></div>':'')+
+            (hp!==null?'<div class="cv-em-out" style="left:'+f(Math.max(0,hp),3)+'%;width:'+f(Math.max(0,100-hp),3)+'%"></div>':'')+
+            '<div class="cv-emk cv-emk-a" style="left:'+f(pp,3)+'%"></div>'+
+            '<div class="cv-emk cv-emk-a" style="left:'+f(cp,3)+'%"></div>'+
+            '<div class="cv-emk cv-emk-s" style="left:'+f(sp,3)+'%"></div>'+
+          '</div>'+
+          (lp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(2,lp),3)+'%"><strong>$'+f(low,2)+'</strong>EM Low</div>':'')+
+          (hp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.min(98,hp),3)+'%"><strong>$'+f(high,2)+'</strong>EM High</div>':'')+
+        '</div>'+
       '</div>'+
       /* Stats strip */
       '<div class="cv-ss">'+
