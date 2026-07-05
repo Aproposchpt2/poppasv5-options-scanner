@@ -11,18 +11,44 @@ const asNumber = value => {
   return Number.isFinite(n) ? n : null;
 };
 
+const toPercent = value => {
+  const n = asNumber(value);
+  if (n === null) return null;
+  return Math.abs(n) <= 1 ? Math.round(n * 1000) / 10 : Math.round(n * 10) / 10;
+};
+
 const addTableAliases = row => {
-  const put = asNumber(row.anchorPutOTM) ?? asNumber(row.putProbOtm);
-  const call = asNumber(row.anchorCallOTM) ?? asNumber(row.callProbOtm);
-  const lower = asNumber(row.lowerAnchorPOTM) ?? asNumber(row.probOtm) ?? (put !== null && call !== null ? Math.min(put, call) : null);
-  const lowerPercent = asNumber(row.lowerAnchorPOTMPercent) ?? (lower !== null ? Math.round(lower * 1000) / 10 : null);
+  const putRaw = asNumber(row.anchorPutOTM) ?? asNumber(row.putProbOtm) ?? asNumber(row.put_prob_otm);
+  const callRaw = asNumber(row.anchorCallOTM) ?? asNumber(row.callProbOtm) ?? asNumber(row.call_prob_otm);
+  const lowerRaw = asNumber(row.lowerAnchorPOTM) ?? asNumber(row.probOtm) ?? asNumber(row.prob_otm) ?? (putRaw !== null && callRaw !== null ? Math.min(putRaw, callRaw) : null);
+
+  const putPercent = toPercent(row.anchorPutOTM) ?? toPercent(row.putProbOtm) ?? toPercent(row.put_prob_otm);
+  const callPercent = toPercent(row.anchorCallOTM) ?? toPercent(row.callProbOtm) ?? toPercent(row.call_prob_otm);
+  const lowerPercent = toPercent(row.lowerAnchorPOTMPercent) ?? toPercent(row.lowerAnchorPOTM) ?? toPercent(row.probOtm) ?? toPercent(row.prob_otm) ?? (putPercent !== null && callPercent !== null ? Math.min(putPercent, callPercent) : null);
+  const ivPercent = toPercent(row.monthlyChainIV) ?? toPercent(row.iv) ?? toPercent(row.ivDisplay);
+
   return {
     ...row,
+
+    // The restored table preview performs display filtering in percentage units.
+    // The live endpoint returns probabilities as decimals, so expose percent aliases for the preview only.
+    lowerAnchorPOTMRaw: lowerRaw,
+    anchorPutOTMRaw: putRaw,
+    anchorCallOTMRaw: callRaw,
+    lowerAnchorPOTM: lowerPercent ?? row.lowerAnchorPOTM,
+    anchorPutOTM: putPercent ?? row.anchorPutOTM,
+    anchorCallOTM: callPercent ?? row.anchorCallOTM,
+    lowerAnchorPOTMPercent: lowerPercent ?? row.lowerAnchorPOTMPercent,
     prob: lowerPercent ?? row.prob,
-    probOtm: lower ?? row.probOtm,
-    putProb: put !== null ? Math.round(put * 1000) / 10 : row.putProb,
-    callProb: call !== null ? Math.round(call * 1000) / 10 : row.callProb,
+    probOtm: lowerPercent ?? row.probOtm,
+    putProb: putPercent ?? row.putProb,
+    callProb: callPercent ?? row.callProb,
+    putProbOtm: putPercent ?? row.putProbOtm,
+    callProbOtm: callPercent ?? row.callProbOtm,
+    monthlyChainIV: ivPercent ?? row.monthlyChainIV,
+    iv: ivPercent ?? row.iv,
     oi: row.openInterest ?? row.monthlyOI ?? row.oi,
+    monthlyOI: row.openInterest ?? row.monthlyOI ?? row.oi,
     spread: row.spreadMax ?? row.spread,
     credit: row.displayedCredit ?? row.credit
   };
@@ -71,7 +97,7 @@ export default async (req) => {
       nextOffset: hasMore ? offset + limit : null,
       filters: { dteMin: 0, dteMax: 45, minAnchorProbability: 80 },
       previewSlice: true,
-      processingMode: 'live-market-candidate-pool-first-slice-second',
+      processingMode: 'live-market-candidate-pool-first-slice-second-percent-normalized',
       filterMode: 'approved-strategy-filters',
       serverFiltersApplied: true,
       serverFiltersRemoved: false,
