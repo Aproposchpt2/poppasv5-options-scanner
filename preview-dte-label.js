@@ -116,6 +116,7 @@
       '.cv-fz-z{position:absolute;top:0;bottom:0}',
       '.cv-fz-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}',
       '.cv-fz-chip{font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;font-weight:900;border-radius:999px;padding:5px 12px;border:1px solid;white-space:nowrap}',
+      '.frame-card{border:1px solid rgba(213,174,85,.28);border-radius:18px;padding:22px 24px;background:linear-gradient(160deg,rgba(7,19,38,.97),rgba(2,8,22,1));margin-bottom:20px;box-shadow:0 16px 48px rgba(0,0,0,.4)}',
       '.cv-em-card{border:1px solid rgba(213,174,85,.18);border-radius:14px;padding:16px 18px;background:rgba(255,255,255,.03);margin-bottom:14px}',
       /* Margin Pair Gauges (Frame 3) */
       '.cv-mg-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:start}',
@@ -269,78 +270,83 @@
           '<div class="cv-sc"><strong>$'+f(d.spot,2)+'</strong><small>Mark</small></div>'+
         '</div>'+
       '</div>'+
-      /* EM Graphs — Three Frames */
+      /* EM Graphs — Three Frames (each in own card) */
       '<div class="cv-em-div"></div>'+
-      '<div class="cv-em-card">'+
-      '<div class="cv-em-hd"><span class="cv-em-ttl">① Zone Map</span><span class="cv-em-rng">'+(d.move?'± $'+f(d.move,2):'Verify')+'</span></div>'+
-      '<div style="position:relative;padding-bottom:36px;margin-bottom:4px">'+
-        '<div class="cv-fz-bar">'+
-          (lpPos!==null?'<div class="cv-fz-z" style="left:0;width:'+f(Math.max(0,lpPos),3)+'%;background:rgba(255,80,80,.2)"></div>':'')+
-          (lpPos!==null?'<div class="cv-fz-z" style="left:'+f(lpPos,3)+'%;width:'+f(Math.max(0,pp-lpPos),3)+'%;background:rgba(242,130,50,.28)"></div>':'')+
-          (lp!==null?'<div class="cv-fz-z" style="left:'+f(pp,3)+'%;width:'+f(Math.max(0,lp-pp),3)+'%;background:rgba(213,174,85,.45)"></div>':'')+
-          (lp!==null&&hp!==null?'<div class="cv-fz-z" style="left:'+f(lp,3)+'%;width:'+f(Math.max(0,hp-lp),3)+'%;background:rgba(123,220,255,.2);border-left:1px solid rgba(123,220,255,.5);border-right:1px solid rgba(123,220,255,.5)"></div>':'')+
-          (hp!==null?'<div class="cv-fz-z" style="left:'+f(hp,3)+'%;width:'+f(Math.max(0,cp-hp),3)+'%;background:rgba(213,174,85,.45)"></div>':'')+
-          (lcPos!==null?'<div class="cv-fz-z" style="left:'+f(cp,3)+'%;width:'+f(Math.max(0,lcPos-cp),3)+'%;background:rgba(242,130,50,.28)"></div>':'')+
-          (lcPos!==null?'<div class="cv-fz-z" style="left:'+f(lcPos,3)+'%;width:'+f(Math.max(0,100-lcPos),3)+'%;background:rgba(255,80,80,.2)"></div>':'')+
-          (lp!==null?'<div class="cv-emk" style="left:'+f(lp,3)+'%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>':'')+
-          (hp!==null?'<div class="cv-emk" style="left:'+f(hp,3)+'%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>':'')+
-          '<div class="cv-emk cv-emk-a" style="left:'+f(pp,3)+'%"></div>'+
-          '<div class="cv-emk cv-emk-a" style="left:'+f(cp,3)+'%"></div>'+
-          '<div class="cv-emk cv-emk-s" style="left:'+f(sp,3)+'%"></div>'+
-        '</div>'+
-        (lp!==null&&Number.isFinite(d.sp)?'<div class="cv-em-lbl" style="left:'+f(Math.max(3,pp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sp,2)+'</strong>Short Put</div>':'')+
-        (lp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(4,Math.min(91,lp)),3)+'%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>':'')+
-        '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,sp)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Mark</div>'+
-        (hp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(9,Math.min(96,hp)),3)+'%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>':'')+
-        (hp!==null&&Number.isFinite(d.sc)?'<div class="cv-em-lbl" style="left:'+f(Math.min(97,cp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sc,2)+'</strong>Short Call</div>':'')+
-      '</div>'+
-      fzChips+
-      '</div>'+
-      
-      '</div>'+'<div class="cv-em-div" style="margin-top:16px"></div>'+'<div class="cv-em-card">'+
-      '
-      '<div class="cv-em-hd"><span class="cv-em-ttl">② EM Frame</span><span class="cv-em-rng">'+(emRange?'EM span $'+f(emRange,2):'Verify')+'</span></div>'+
-      (emRange?
-        '<div style="position:relative;padding-bottom:36px;margin-bottom:10px">'+
-          '<div style="position:relative;height:36px;border-radius:8px;overflow:hidden;border:1px solid rgba(123,220,255,.45);background:linear-gradient(90deg,rgba(123,220,255,.06),rgba(123,220,255,.22),rgba(123,220,255,.06))">'+
-            '<div class="cv-emk" style="left:.5%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>'+
-            '<div class="cv-emk" style="left:99.5%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.6);z-index:4"></div>'+
-            '<div class="cv-emk cv-emk-s" style="left:'+f(spotInEM,3)+'%"></div>'+
+
+      /* ── Frame 1: Zone Map ── */
+      '<div class="frame-card">'+
+        '<p class="cv-ey">Frame ①</p>'+
+        '<div class="cv-em-hd"><span class="cv-em-ttl">Zone Map</span><span class="cv-em-rng">'+(d.move?'± $'+f(d.move,2):'Verify')+'</span></div>'+
+        '<div style="position:relative;padding-bottom:36px;margin-bottom:4px">'+
+          '<div class="cv-fz-bar">'+
+            (lpPos!==null?'<div class="cv-fz-z" style="left:0;width:'+f(Math.max(0,lpPos),3)+'%;background:rgba(255,80,80,.25)"></div>':'')+
+            (lpPos!==null?'<div class="cv-fz-z" style="left:'+f(lpPos,3)+'%;width:'+f(Math.max(0,pp-lpPos),3)+'%;background:rgba(242,130,50,.32)"></div>':'')+
+            (lp!==null?'<div class="cv-fz-z" style="left:'+f(pp,3)+'%;width:'+f(Math.max(0,lp-pp),3)+'%;background:rgba(213,174,85,.48)"></div>':'')+
+            (lp!==null&&hp!==null?'<div class="cv-fz-z" style="left:'+f(lp,3)+'%;width:'+f(Math.max(0,hp-lp),3)+'%;background:rgba(123,220,255,.22);border-left:1px solid rgba(123,220,255,.5);border-right:1px solid rgba(123,220,255,.5)"></div>':'')+
+            (hp!==null?'<div class="cv-fz-z" style="left:'+f(hp,3)+'%;width:'+f(Math.max(0,cp-hp),3)+'%;background:rgba(213,174,85,.48)"></div>':'')+
+            (lcPos!==null?'<div class="cv-fz-z" style="left:'+f(cp,3)+'%;width:'+f(Math.max(0,lcPos-cp),3)+'%;background:rgba(242,130,50,.32)"></div>':'')+
+            (lcPos!==null?'<div class="cv-fz-z" style="left:'+f(lcPos,3)+'%;width:'+f(Math.max(0,100-lcPos),3)+'%;background:rgba(255,80,80,.25)"></div>':'')+
+            (lp!==null?'<div class="cv-emk" style="left:'+f(lp,3)+'%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.65);z-index:4"></div>':'')+
+            (hp!==null?'<div class="cv-emk" style="left:'+f(hp,3)+'%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.65);z-index:4"></div>':'')+
+            '<div class="cv-emk cv-emk-a" style="left:'+f(pp,3)+'%"></div>'+
+            '<div class="cv-emk cv-emk-a" style="left:'+f(cp,3)+'%"></div>'+
+            '<div class="cv-emk cv-emk-s" style="left:'+f(sp,3)+'%"></div>'+
           '</div>'+
-          '<div class="cv-em-lbl" style="left:2%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>'+
-          '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,spotInEM)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Mark</div>'+
-          '<div class="cv-em-lbl" style="left:98%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>'+
+          (lp!==null&&Number.isFinite(d.sp)?'<div class="cv-em-lbl" style="left:'+f(Math.max(3,pp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sp,2)+'</strong>Short Put</div>':'')+
+          (lp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(4,Math.min(91,lp)),3)+'%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>':'')+
+          '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,sp)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Mark</div>'+
+          (hp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(9,Math.min(96,hp)),3)+'%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>':'')+
+          (hp!==null&&Number.isFinite(d.sc)?'<div class="cv-em-lbl" style="left:'+f(Math.min(97,cp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sc,2)+'</strong>Short Call</div>':'')+
         '</div>'+
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">'+
-          (putBuf!==null?'<div style="border:1px solid rgba(213,174,85,.35);border-radius:10px;padding:10px 12px;background:rgba(213,174,85,.06)"><div style="font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:900;margin-bottom:3px">Put Buffer</div><div style="font-size:1.05rem;color:var(--amber);font-weight:700">$'+putBuf+'</div><div style="font-size:.6rem;color:var(--muted)">SP $'+f(d.sp,2)+' $'+putBuf+' below EM Low</div></div>':'')+
-          (callBuf!==null?'<div style="border:1px solid rgba(62,227,145,.35);border-radius:10px;padding:10px 12px;background:rgba(62,227,145,.06)"><div style="font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:var(--green);font-weight:900;margin-bottom:3px">Call Buffer</div><div style="font-size:1.05rem;color:var(--green);font-weight:700">$'+callBuf+'</div><div style="font-size:.6rem;color:var(--muted)">SC $'+f(d.sc,2)+' $'+callBuf+' above EM High</div></div>':'')+
-        '</div>'
-      :
-        '<div style="font-size:.72rem;color:var(--muted);padding:8px 0">EM data unavailable.</div>'
-      )+
+        fzChips+
       '</div>'+
-      
-      '</div>'+'<div class="cv-em-div" style="margin-top:10px"></div>'+'<div class="cv-em-card">'+
-      
-      '<div class="cv-em-hd"><span class="cv-em-ttl">③ Buffer Gauges</span><span class="cv-em-rng">'+(spotPct!==null?spotPct+'% spot in zone':'—')+'</span></div>'+
-      '<div class="cv-mg-grid">'+
-        '<div>'+
-          '<div class="cv-mg-lbl" style="color:var(--amber)">Put Buffer</div>'+
-          '<div class="cv-mg-bar"><div class="cv-mg-fill" style="width:'+f(putFill,1)+'%;background:linear-gradient(90deg,rgba(242,180,71,.7),rgba(242,180,71,.35))"></div><div class="cv-mg-val">'+(putBuf!==null?'$'+putBuf:'—')+'</div></div>'+
-          '<div class="cv-mg-sub"><span style="color:var(--gold)">SP $'+f(d.sp,2)+'</span><span style="color:var(--cyan)">EM Low $'+f(low,2)+'</span></div>'+
-        '</div>'+
-        '<div class="cv-mg-badge">'+
-          '<div class="cv-mg-big">'+(spotPct!==null?spotPct+'%':'—')+'</div>'+
-          '<div class="cv-mg-btxt">Mark in profit zone</div>'+
-          '<div class="cv-mg-bsub">$'+f(d.spot,2)+'</div>'+
-        '</div>'+
-        '<div>'+
-          '<div class="cv-mg-lbl" style="color:var(--green)">Call Buffer</div>'+
-          '<div class="cv-mg-bar"><div class="cv-mg-fill" style="width:'+f(callFill,1)+'%;background:linear-gradient(90deg,rgba(62,227,145,.7),rgba(62,227,145,.35))"></div><div class="cv-mg-val">'+(callBuf!==null?'$'+callBuf:'—')+'</div></div>'+
-          '<div class="cv-mg-sub"><span style="color:var(--cyan)">EM High $'+f(high,2)+'</span><span style="color:var(--gold)">SC $'+f(d.sc,2)+'</span></div>'+
-        '</div>'+
-      '</div>'+
+
+      /* ── Frame 2: EM Frame ── */
+      '<div class="frame-card">'+
+        '<p class="cv-ey">Frame ②</p>'+
+        '<div class="cv-em-hd"><span class="cv-em-ttl">EM Frame</span><span class="cv-em-rng">'+(emRange?'EM span $'+f(emRange,2):'Verify')+'</span></div>'+
+        (emRange?
+          '<div style="position:relative;padding-bottom:36px;margin-bottom:12px">'+
+            '<div style="position:relative;height:42px;border-radius:8px;overflow:hidden;border:1px solid rgba(123,220,255,.5);background:linear-gradient(90deg,rgba(123,220,255,.06),rgba(123,220,255,.24),rgba(123,220,255,.06))">'+
+              '<div class="cv-emk" style="left:.5%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.65);z-index:4"></div>'+
+              '<div class="cv-emk" style="left:99.5%;top:-2px;bottom:-2px;width:1px;background:rgba(123,220,255,.65);z-index:4"></div>'+
+              '<div class="cv-emk cv-emk-s" style="left:'+f(spotInEM,3)+'%"></div>'+
             '</div>'+
+            '<div class="cv-em-lbl" style="left:2%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>'+
+            '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,spotInEM)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Mark</div>'+
+            '<div class="cv-em-lbl" style="left:98%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>'+
+          '</div>'+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+            (putBuf!==null?'<div style="border:1px solid rgba(213,174,85,.35);border-radius:10px;padding:12px 14px;background:rgba(213,174,85,.06)"><div style="font-size:.54rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:900;margin-bottom:4px">Put Buffer</div><div style="font-size:1.1rem;color:var(--amber);font-weight:700;line-height:1.1">$'+putBuf+'</div><div style="font-size:.6rem;color:var(--muted);margin-top:3px">SP $'+f(d.sp,2)+' · $'+putBuf+' below EM Low</div></div>':'')+
+            (callBuf!==null?'<div style="border:1px solid rgba(62,227,145,.35);border-radius:10px;padding:12px 14px;background:rgba(62,227,145,.06)"><div style="font-size:.54rem;letter-spacing:.14em;text-transform:uppercase;color:var(--green);font-weight:900;margin-bottom:4px">Call Buffer</div><div style="font-size:1.1rem;color:var(--green);font-weight:700;line-height:1.1">$'+callBuf+'</div><div style="font-size:.6rem;color:var(--muted);margin-top:3px">SC $'+f(d.sc,2)+' · $'+callBuf+' above EM High</div></div>':'')+
+          '</div>'
+        :
+          '<div style="font-size:.72rem;color:var(--muted);padding:8px 0">EM data unavailable.</div>'
+        )+
+      '</div>'+
+
+      /* ── Frame 3: Buffer Gauges ── */
+      '<div class="frame-card">'+
+        '<p class="cv-ey">Frame ③</p>'+
+        '<div class="cv-em-hd"><span class="cv-em-ttl">Buffer Gauges</span><span class="cv-em-rng">'+(spotPct!==null?spotPct+'% Mark in zone':'—')+'</span></div>'+
+        '<div class="cv-mg-grid">'+
+          '<div>'+
+            '<div class="cv-mg-lbl" style="color:var(--amber)">Put Buffer</div>'+
+            '<div class="cv-mg-bar"><div class="cv-mg-fill" style="width:'+f(putFill,1)+'%;background:linear-gradient(90deg,rgba(242,180,71,.75),rgba(242,180,71,.35))"></div><div class="cv-mg-val">'+(putBuf!==null?'$'+putBuf:'—')+'</div></div>'+
+            '<div class="cv-mg-sub"><span style="color:var(--gold)">SP $'+f(d.sp,2)+'</span><span style="color:var(--cyan)">EM Low $'+f(low,2)+'</span></div>'+
+          '</div>'+
+          '<div class="cv-mg-badge">'+
+            '<div class="cv-mg-big">'+(spotPct!==null?spotPct+'%':'—')+'</div>'+
+            '<div class="cv-mg-btxt">Mark in<br>profit zone</div>'+
+            '<div class="cv-mg-bsub">$'+f(d.spot,2)+'</div>'+
+          '</div>'+
+          '<div>'+
+            '<div class="cv-mg-lbl" style="color:var(--green)">Call Buffer</div>'+
+            '<div class="cv-mg-bar"><div class="cv-mg-fill" style="width:'+f(callFill,1)+'%;background:linear-gradient(90deg,rgba(62,227,145,.75),rgba(62,227,145,.35))"></div><div class="cv-mg-val">'+(callBuf!==null?'$'+callBuf:'—')+'</div></div>'+
+            '<div class="cv-mg-sub"><span style="color:var(--cyan)">EM High $'+f(high,2)+'</span><span style="color:var(--gold)">SC $'+f(d.sc,2)+'</span></div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
       /* Stats strip */
       '<div class="cv-ss">'+
         '<div class="cv-st"><div class="cv-sl">Net Credit</div><div class="cv-sv">'+(d.credit||'—')+'</div></div>'+
