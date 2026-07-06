@@ -116,6 +116,7 @@
       '.cv-fz-z{position:absolute;top:0;bottom:0}',
       '.cv-fz-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}',
       '.cv-fz-chip{font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;font-weight:900;border-radius:999px;padding:5px 12px;border:1px solid;white-space:nowrap}',
+      '.cv-em-card{border:1px solid rgba(213,174,85,.18);border-radius:14px;padding:16px 18px;background:rgba(255,255,255,.03);margin-bottom:14px}',
       /* Margin Pair Gauges (Frame 3) */
       '.cv-mg-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:start}',
       '.cv-mg-bar{height:36px;border-radius:8px;overflow:hidden;border:1px solid rgba(191,214,255,.16);background:rgba(0,0,0,.4);position:relative}',
@@ -177,16 +178,16 @@
         sc=document.querySelector('#ticketBox .leg:nth-child(3) strong'),
         bc=document.querySelector('#ticketBox .leg:nth-child(4) strong'),
         sym=(cell(r,1)||(sp?sp.textContent:'')||'Selected').replace(/[^A-Z0-9.\-]/gi,'').replace(/[0-9].*$/,'')||'Selected',
-        spot=money(cell(r,3)),move=money(cell(r,7)),fallback=n(cell(r,11)),
+        spot=money(cell(r,4)),move=money(cell(r,8)),fallback=n(cell(r,12)),
         pp=n(metric('Put Anchor P(OTM)')),cp=n(metric('Call Anchor P(OTM)'));
     return{
       r:r,sym:sym,spot:spot,move:move,
       sp:strike(sp?sp.textContent:''),bp:strike(bp?bp.textContent:''),
       sc:strike(sc?sc.textContent:''),bc:strike(bc?bc.textContent:''),
       pp:pp===null?fallback:pp,cp:cp===null?fallback:cp,
-      em:cell(r,8)||metric('Expected Range'),
-      iv:cell(r,9),review:cell(r,16),
-      dte:cell(r,4),credit:cell(r,12),roc:cell(r,14)
+      em:cell(r,9)||metric('Expected Range'),
+      iv:cell(r,10),review:cell(r,20),
+      dte:cell(r,5),credit:cell(r,15),roc:cell(r,17)
     };
   }
 
@@ -270,6 +271,7 @@
       '</div>'+
       /* EM Graphs — Three Frames */
       '<div class="cv-em-div"></div>'+
+      '<div class="cv-em-card">'+
       '<div class="cv-em-hd"><span class="cv-em-ttl">① Zone Map</span><span class="cv-em-rng">'+(d.move?'± $'+f(d.move,2):'Verify')+'</span></div>'+
       '<div style="position:relative;padding-bottom:36px;margin-bottom:4px">'+
         '<div class="cv-fz-bar">'+
@@ -288,12 +290,15 @@
         '</div>'+
         (lp!==null&&Number.isFinite(d.sp)?'<div class="cv-em-lbl" style="left:'+f(Math.max(3,pp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sp,2)+'</strong>Short Put</div>':'')+
         (lp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(4,Math.min(91,lp)),3)+'%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>':'')+
-        '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,sp)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Spot</div>'+
+        '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,sp)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Mark</div>'+
         (hp!==null?'<div class="cv-em-lbl" style="left:'+f(Math.max(9,Math.min(96,hp)),3)+'%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>':'')+
         (hp!==null&&Number.isFinite(d.sc)?'<div class="cv-em-lbl" style="left:'+f(Math.min(97,cp),3)+'%"><strong style="color:var(--gold)">$'+f(d.sc,2)+'</strong>Short Call</div>':'')+
       '</div>'+
       fzChips+
-      '<div class="cv-em-div" style="margin-top:16px"></div>'+
+      '</div>'+
+      
+      '</div>'+'<div class="cv-em-div" style="margin-top:16px"></div>'+'<div class="cv-em-card">'+
+      '
       '<div class="cv-em-hd"><span class="cv-em-ttl">② EM Frame</span><span class="cv-em-rng">'+(emRange?'EM span $'+f(emRange,2):'Verify')+'</span></div>'+
       (emRange?
         '<div style="position:relative;padding-bottom:36px;margin-bottom:10px">'+
@@ -303,7 +308,7 @@
             '<div class="cv-emk cv-emk-s" style="left:'+f(spotInEM,3)+'%"></div>'+
           '</div>'+
           '<div class="cv-em-lbl" style="left:2%"><strong style="color:var(--cyan)">$'+f(low,2)+'</strong>EM Low</div>'+
-          '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,spotInEM)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Spot</div>'+
+          '<div class="cv-em-lbl" style="left:'+f(Math.max(5,Math.min(95,spotInEM)),3)+'%"><strong>$'+f(d.spot,2)+'</strong>Mark</div>'+
           '<div class="cv-em-lbl" style="left:98%"><strong style="color:var(--cyan)">$'+f(high,2)+'</strong>EM High</div>'+
         '</div>'+
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">'+
@@ -313,7 +318,10 @@
       :
         '<div style="font-size:.72rem;color:var(--muted);padding:8px 0">EM data unavailable.</div>'
       )+
-      '<div class="cv-em-div" style="margin-top:10px"></div>'+
+      '</div>'+
+      
+      '</div>'+'<div class="cv-em-div" style="margin-top:10px"></div>'+'<div class="cv-em-card">'+
+      
       '<div class="cv-em-hd"><span class="cv-em-ttl">③ Buffer Gauges</span><span class="cv-em-rng">'+(spotPct!==null?spotPct+'% spot in zone':'—')+'</span></div>'+
       '<div class="cv-mg-grid">'+
         '<div>'+
@@ -323,7 +331,7 @@
         '</div>'+
         '<div class="cv-mg-badge">'+
           '<div class="cv-mg-big">'+(spotPct!==null?spotPct+'%':'—')+'</div>'+
-          '<div class="cv-mg-btxt">Spot in profit zone</div>'+
+          '<div class="cv-mg-btxt">Mark in profit zone</div>'+
           '<div class="cv-mg-bsub">$'+f(d.spot,2)+'</div>'+
         '</div>'+
         '<div>'+
@@ -332,7 +340,8 @@
           '<div class="cv-mg-sub"><span style="color:var(--cyan)">EM High $'+f(high,2)+'</span><span style="color:var(--gold)">SC $'+f(d.sc,2)+'</span></div>'+
         '</div>'+
       '</div>'+
-            /* Stats strip */
+            '</div>'+
+      /* Stats strip */
       '<div class="cv-ss">'+
         '<div class="cv-st"><div class="cv-sl">Net Credit</div><div class="cv-sv">'+(d.credit||'—')+'</div></div>'+
         '<div class="cv-st"><div class="cv-sl">ROC</div><div class="cv-sv">'+(d.roc||'—')+'</div></div>'+
