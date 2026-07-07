@@ -81,7 +81,7 @@ function readFilters(url) {
     dteMax: n(q.get("dteMax"), 45),
     excludeEarnings: String(q.get("excludeEarnings") || "yes").toLowerCase(),
     idx: String(q.get("idx") || "both").toLowerCase(),
-    width: n(q.get("width"), 5),
+    width: n(q.get("width"), 0),
     emStatus: String(q.get("emStatus") || "Outside Expected Move"),
     ivStatus: String(q.get("ivStatus") || "All"),
     rankBy: String(q.get("rankBy") || "edge").toLowerCase()
