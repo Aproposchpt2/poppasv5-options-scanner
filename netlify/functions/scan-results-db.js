@@ -68,7 +68,7 @@ function readFilters(url) {
   const q = url.searchParams;
   const rawLimit = n(q.get("limit"), 50);
   return {
-    limit: Math.max(1, Math.min(50, Math.floor(rawLimit || 50))),
+    limit: Math.max(1, Math.min(1000, Math.floor(rawLimit || 50))),
     offset: Math.max(0, Math.floor(n(q.get("offset"), 0))),
     rocMin: n(q.get("rocMin"), 5),
     rocMax: n(q.get("rocMax"), 10),
