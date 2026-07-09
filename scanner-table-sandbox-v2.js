@@ -9,12 +9,12 @@
   function sanitize(text) {
     return String(text || '')
       .replace(/Supabase/gi, 'market data')
-      .replace(/Netlify/gi, 'scanner service')
+      .replace(/Netlify/gi, 'screener service')
       .replace(/Postgres/gi, 'processing layer')
       .replace(/REST/gi, 'data')
-      .replace(/scan-results-preview/gi, 'scanner results')
-      .replace(/scan-results/gi, 'scanner results')
-      .replace(/scan-build-background/gi, 'scanner refresh')
+      .replace(/scan-results-preview/gi, 'screener results')
+      .replace(/scan-results/gi, 'screener results')
+      .replace(/scan-build-background/gi, 'screener refresh')
       .replace(/v4-live-supabase-0-45-prob80/gi, 'approved strategy filters');
   }
 
@@ -118,7 +118,7 @@
   function restoreFaqAndFooter() {
     const faq = $('faq');
     if (faq) {
-      faq.innerHTML = '<div class="container panel"><p class="eyebrow">FAQ</p><h2 class="title">Scanner questions</h2><div class="cards5"><div class="card"><h3>Where is the scanner data sourced from?</h3><p>Market data is sourced from professional market-data feeds and processed through POPPA\'S Strategy OS for educational Iron Condor candidate analysis.</p></div><div class="card"><h3>What does Scan Now do?</h3><p>It searches for qualifying educational candidates using the current scanner settings.</p></div><div class="card"><h3>What does Scan For More Records do?</h3><p>It expands the visible candidate set for additional educational review.</p></div><div class="card"><h3>Are these trade recommendations?</h3><p>No. Rows are educational candidates only. Pricing, liquidity, expiration, earnings, and risk must be verified independently.</p></div><div class="card"><h3>What is ROC After Cost?</h3><p>It estimates return after standard commission and fee assumptions are included.</p></div></div></div>';
+      faq.innerHTML = '<div class="container panel"><p class="eyebrow">FAQ</p><h2 class="title">Scanner questions</h2><div class="cards5"><div class="card"><h3>Where is the scanner data sourced from?</h3><p>Market data is sourced from professional market-data feeds and processed through POPPA\'S Strategy OS for educational Iron Condor candidate analysis.</p></div><div class="card"><h3>What does Screen Now do?</h3><p>It searches for qualifying educational candidates using the current scanner settings.</p></div><div class="card"><h3>What does Screen For More Records do?</h3><p>It expands the visible candidate set for additional educational review.</p></div><div class="card"><h3>Are these trade recommendations?</h3><p>No. Rows are educational candidates only. Pricing, liquidity, expiration, earnings, and risk must be verified independently.</p></div><div class="card"><h3>What is ROC After Cost?</h3><p>It estimates return after standard commission and fee assumptions are included.</p></div></div></div>';
     }
     document.querySelectorAll('.foot,footer').forEach(f => {
       f.innerHTML = '<div class="poppas-footer-brand">POPPA\'S STRATEGY OS<span>ENGINEERED BY INNOVATIVE INTELLIGENCE</span></div>';
@@ -130,14 +130,14 @@
   function clearAutoRenderedBoard() {
     if (userStartedScan) return;
     const body = $('resultsBody');
-    if (body) body.innerHTML = '<tr><td colspan="17" class="empty">No scan has been run yet. Adjust settings, then click Scan Now.</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="17" class="empty">No scan has been run yet. Adjust settings, then click Screen Now.</td></tr>';
     if ($('candidateCount')) $('candidateCount').textContent = '—';
     if ($('scanMode')) $('scanMode').textContent = 'Waiting';
     if ($('scanStamp')) $('scanStamp').textContent = '—';
     if ($('diagMatches')) $('diagMatches').textContent = '—';
     if ($('diagDisplayed')) $('diagDisplayed').textContent = '—';
-    if ($('ticketBox')) $('ticketBox').innerHTML = '<p class="note">Click Scan Now, then select a candidate.</p>';
-    greenMessage('Ready. Adjust settings if needed, then click Scan Now.');
+    if ($('ticketBox')) $('ticketBox').innerHTML = '<p class="note">Click Screen Now, then select a candidate.</p>';
+    greenMessage('Ready. Adjust settings if needed, then click Screen Now.');
   }
 
   function sanitizeVisibleText() {
@@ -187,17 +187,17 @@
     }
 
     const run = $('runScanBtn');
-    if (run && typeof window.runScan === 'function') { run.textContent = 'Scan Now'; run.onclick = event => { event.preventDefault(); normalizeCtaState(); window.runScan(); }; }
+    if (run && typeof window.runScan === 'function') { run.textContent = 'Screen Now'; run.onclick = event => { event.preventDefault(); normalizeCtaState(); window.runScan(); }; }
     const rescan = $('rescanBtn');
-    if (rescan && typeof window.rescan === 'function') { rescan.textContent = 'Scan For More Records'; rescan.onclick = event => { event.preventDefault(); normalizeCtaState(); window.rescan(); }; }
+    if (rescan && typeof window.rescan === 'function') { rescan.textContent = 'Screen For More Records'; rescan.onclick = event => { event.preventDefault(); normalizeCtaState(); window.rescan(); }; }
     normalizeCtaState();
   }
 
   function hookControlsManualOnly() {
     ['idxSel','spreadWidth','dteWindow','excludeEarnings','rankBy','rocMin','rocMax','minProb','ivMin','minOI','minShortOI','maxSpread','maxResults','ivStatusSel','emStatusSel'].forEach(id => {
       const el = $(id); if (!el) return;
-      el.oninput = () => greenMessage('Scanner settings changed. Click Scan Now to refresh your results.');
-      el.onchange = () => greenMessage('Scanner settings changed. Click Scan Now to refresh your results.');
+      el.oninput = () => greenMessage('Scanner settings changed. Click Screen Now to refresh your results.');
+      el.onchange = () => greenMessage('Scanner settings changed. Click Screen Now to refresh your results.');
     });
   }
 
