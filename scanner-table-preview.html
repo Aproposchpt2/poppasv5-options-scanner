@@ -402,18 +402,10 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeLesson(
 </style>
 <script id="cr001-script">
 (function(){
-'use strict';
+"use strict";
 var _r=null;
 
-/* ── Strike helpers ── */
-function strikeInc(spot){
-  if(spot<50) return 1;
-  if(spot<150) return 2.5;
-  if(spot<400) return 5;
-  return 10;
-}
-
-/* ── Normal CDF (Abramowitz & Stegun) ── */
+/* Normal CDF */
 function normCDF(x){
   var a=[0.319381530,-0.356563782,1.781477937,-1.821255978,1.330274429];
   var k=1/(1+0.2316419*Math.abs(x));
@@ -423,204 +415,103 @@ function normCDF(x){
   return x>=0?val:1-val;
 }
 
-/* ── Black-Scholes pricer ── */
+/* Black-Scholes option pricer */
 function bsPrice(S,K,T,iv,isPut){
   if(T<=0||iv<=0||S<=0||K<=0) return 0;
-  var r=0.045;
-  var d1=(Math.log(S/K)+(r+iv*iv/2)*T)/(iv*Math.sqrt(T));
+  var rf=0.045;
+  var d1=(Math.log(S/K)+(rf+iv*iv/2)*T)/(iv*Math.sqrt(T));
   var d2=d1-iv*Math.sqrt(T);
-  if(isPut) return Math.max(0,K*Math.exp(-r*T)*normCDF(-d2)-S*normCDF(-d1));
-  return Math.max(0,S*normCDF(d1)-K*Math.exp(-r*T)*normCDF(d2));
+  if(isPut) return Math.max(0,K*Math.exp(-rf*T)*normCDF(-d2)-S*normCDF(-d1));
+  return Math.max(0,S*normCDF(d1)-K*Math.exp(-rf*T)*normCDF(d2));
 }
 
 function computeCredit(state,spot,iv,dte){
-  var T=dte/365, s=iv/100;
-  var sp=bsPrice(spot,state.putSell,T,s,true);
-  var bp=bsPrice(spot,state.putBuy,T,s,true);
-  var sc=bsPrice(spot,state.callSell,T,s,false);
-  var bc=bsPrice(spot,state.callBuy,T,s,false);
-  return (sp-bp)+(sc-bc);
+  var T=dte/365,s=iv/100;
+  return (bsPrice(spot,state.putSell,T,s,true)-bsPrice(spot,state.putBuy,T,s,true))
+        +(bsPrice(spot,state.callSell,T,s,false)-bsPrice(spot,state.callBuy,T,s,false));
 }
 
-/* ── Validation ── */
-function validate(state){
-  var errs=[];
-  if(state.putBuy>=state.putSell) errs.push('VAL-001 — Buy Put (+state.putBuy+') must be below Sell Put (+state.putSell+'). Adjust legs.');
-  if(state.callBuy<=state.callSell) errs.push('VAL-002 — Buy Call (+state.callBuy+') must be above Sell Call (+state.callSell+'). Adjust legs.');
-  return errs;
-}
+function f2(n){return Number(n).toFixed(2);}
+function el(id){return document.getElementById(id);}
+function setEl(id,v){var e=el(id);if(e)e.innerHTML=v;}
 
-function fmt2(n){return Number(n).toFixed(2);}
-
-/* ── Rebuild ticket metrics + chart ── */
+/* Rebuild all ticket metrics + P&L chart after any leg change */
 function rebuildTicket(){
   if(!_r) return;
-  function gv(id){return parseFloat(document.getElementById(id)&&document.getElementById(id).value||0);}
-  var state={putBuy:gv('leg-putBuy'),putSell:gv('leg-putSell'),callSell:gv('leg-callSell'),callBuy:gv('leg-callBuy')};
-
-  var banner=document.getElementById('cr001-banner');
-  var errs=validate(state);
+  function gv(id){var e=el(id);return e?parseFloat(e.value)||0:0;}
+  var state={putBuy:gv("leg-putBuy"),putSell:gv("leg-putSell"),callSell:gv("leg-callSell"),callBuy:gv("leg-callBuy")};
+  var banner=el("cr001-banner");
+  var errs=[];
+  if(state.putBuy>=state.putSell) errs.push("VAL-001: Buy Put must be BELOW Sell Put.");
+  if(state.callBuy<=state.callSell) errs.push("VAL-002: Buy Call must be ABOVE Sell Call.");
   if(errs.length){
-    if(banner){banner.textContent=errs.join(' · ');banner.style.display='block';}
-    var cw=document.getElementById('condorChartWrap');
-    if(cw) cw.innerHTML='';
+    if(banner){banner.textContent=errs.join(" | ");banner.style.display="block";}
+    var cw=el("condorChartWrap");if(cw)cw.innerHTML="";
     return;
   }
-  if(banner) banner.style.display='none';
-
-  var spot=parseFloat(_r.spot||(_r.putSell+_r.callSell)/2||100);
-  var iv=parseFloat(_r.iv||35);
-  var dte=parseFloat(_r.dte||30);
-
-  var credit=computeCredit(state,spot,iv,dte);
-  credit=Math.round(credit*100)/100;
-  var putW=state.putSell-state.putBuy;
-  var callW=state.callBuy-state.callSell;
-  var width=Math.min(putW,callW);
+  if(banner)banner.style.display="none";
+  var spot=parseFloat(_r.spot)||((_r.putSell+_r.callSell)/2)||100;
+  var iv=parseFloat(_r.iv)||35;
+  var dte=parseFloat(_r.dte)||30;
+  var credit=Math.round(computeCredit(state,spot,iv,dte)*100)/100;
+  var width=Math.min(state.putSell-state.putBuy,state.callBuy-state.callSell);
   var risk=Math.max(0,Math.round((width-credit)*100)/100);
   var roc=risk>0?Math.round(credit/risk*1000)/10:0;
   var loBE=Math.round((state.putSell-credit)*100)/100;
   var hiBE=Math.round((state.callSell+credit)*100)/100;
-
-  function setEl(id,html){var e=document.getElementById(id);if(e)e.innerHTML=html;}
-  setEl('cr-credit','+fmt2(credit)+' · +Math.round(credit*100)+'/ct');
-  setEl('cr-risk','+fmt2(risk)+' · +Math.round(risk*100)+'/ct');
-  setEl('cr-roc',roc.toFixed(1)+'%');
-  setEl('cr-lobe','+fmt2(loBE));
-  setEl('cr-hibe','+fmt2(hiBE));
-
-  /* Rebuild P&L chart */
-  var cw=document.getElementById('condorChartWrap');
-  if(cw&&typeof buildCondorChart==='function'){
-    var nr=Object.assign({},_r,{
-      putBuy:state.putBuy,putSell:state.putSell,callSell:state.callSell,callBuy:state.callBuy,
-      long_put:state.putBuy,short_put:state.putSell,short_call:state.callSell,long_call:state.callBuy,
-      credit:credit,risk:risk
-    });
+  var DS="$";
+  setEl("cr-credit",DS+f2(credit)+" · "+DS+Math.round(credit*100)+"/ct");
+  setEl("cr-risk",DS+f2(risk)+" · "+DS+Math.round(risk*100)+"/ct");
+  setEl("cr-roc",roc.toFixed(1)+"%");
+  setEl("cr-lobe",DS+f2(loBE));
+  setEl("cr-hibe",DS+f2(hiBE));
+  var beR=el("cr-be-row"),beR2=el("cr-be-row2");
+  if(beR)beR.style.display="";
+  if(beR2)beR2.style.display="";
+  var cw=el("condorChartWrap");
+  if(cw&&typeof buildCondorChart==="function"){
+    var nr=Object.assign({},_r,{putBuy:state.putBuy,putSell:state.putSell,callSell:state.callSell,callBuy:state.callBuy,long_put:state.putBuy,short_put:state.putSell,short_call:state.callSell,long_call:state.callBuy,credit:credit,risk:risk});
     cw.innerHTML=buildCondorChart(nr);
   }
 }
 window.CR001_rebuildTicket=rebuildTicket;
 
-/* ── Populate leg selects via DOM API (called via setTimeout from template) ── */
+/* Populate the 4 leg selects — called directly from showTicket after innerHTML is set */
 window.CR001_populate=function(){
   var r=window._CR001_r;
-  if(!r) return;
+  if(!r){console.warn("CR001_populate: no _CR001_r");return;}
+  _r=r;
   var spot=parseFloat(r.spot)||((parseFloat(r.putSell||0)+parseFloat(r.callSell||0))/2)||100;
   var legs={
-    putSell: {baseline:parseFloat(r.putSell||r.short_put)||0, sym:'P'},
-    putBuy:  {baseline:parseFloat(r.putBuy||r.long_put)||0,  sym:'P'},
-    callSell:{baseline:parseFloat(r.callSell||r.short_call)||0,sym:'C'},
-    callBuy: {baseline:parseFloat(r.callBuy||r.long_call)||0, sym:'C'}
+    putSell:{baseline:parseFloat(r.putSell||r.short_put)||0,sym:"P"},
+    putBuy: {baseline:parseFloat(r.putBuy||r.long_put)||0,sym:"P"},
+    callSell:{baseline:parseFloat(r.callSell||r.short_call)||0,sym:"C"},
+    callBuy:{baseline:parseFloat(r.callBuy||r.long_call)||0,sym:"C"}
   };
   Object.keys(legs).forEach(function(legId){
-    var sel=document.getElementById('leg-'+legId);
-    if(!sel) return;
-    var baseline=legs[legId].baseline, sym=legs[legId].sym;
-    var inc=5;
-    sel.innerHTML='';
+    var sel=el("leg-"+legId);
+    if(!sel){console.warn("CR001: select not found: leg-"+legId);return;}
+    var baseline=legs[legId].baseline,sym=legs[legId].sym;
+    sel.innerHTML="";
     for(var offset=-3;offset<=3;offset++){
-      var strike=Math.round((baseline+offset*inc)*100)/100;
-      var opt=document.createElement('option');
+      var strike=Math.round((baseline+offset*5)*100)/100;
+      var opt=document.createElement("option");
       opt.value=String(strike);
-      opt.textContent=(offset===0?'\u2605 ':'')+r.symbol+' '+strike+sym+(offset===0?' (screener)':'');
-      if(offset===0) opt.selected=true;
+      opt.textContent=(offset===0?"★ ":"")+r.symbol+" "+strike+sym+(offset===0?" (screener)":"");
+      if(offset===0)opt.selected=true;
       sel.appendChild(opt);
     }
   });
   rebuildTicket();
 };
 
-
-/* ── Reset to screener baseline ── */
+/* Reset all legs to screener baseline (index 3 = offset 0) */
 window.CR001_reset=function(){
-  ['putBuy','putSell','callSell','callBuy'].forEach(function(leg){
-    var sel=document.getElementById('leg-'+leg);
-    if(sel) sel.selectedIndex=3;
+  ["putBuy","putSell","callSell","callBuy"].forEach(function(leg){
+    var sel=el("leg-"+leg);if(sel)sel.selectedIndex=3;
   });
   rebuildTicket();
 };
-
-/* ── Build selector HTML ── */
-function selHtml(legId,legLabel,baseline,spot,isSell){
-  var inc=strikeInc(spot), opts='';
-  for(var offset=-3;offset<=3;offset++){
-    var strike=Math.round((baseline+offset*inc)*100)/100;
-    var label=offset===0?('★ '+strike+' (screener)'):((offset>0?'+':'')+Math.round(offset*inc*100)/100+' → '+strike);
-    opts+='<option value="'+strike+'"'+(offset===0?' selected':'')+'>'+label+'</option>';
-  }
-  return '<div class="leg'+(isSell?' sell':'')+'">'
-    +'<span>'+legLabel+'</span>'
-    +'<select class="leg-sel" id="leg-'+legId+'" onchange="window.CR001_rebuildTicket()">'+opts+'</select>'
-    +'</div>';
-}
-
-/* ── Inject selectors into rendered ticket ── */
-function injectSelectors(r){
-  _r=r;
-  var box=document.getElementById('ticketBox');
-  if(!box) return;
-
-  var spot=parseFloat(r.spot||100);
-  var putSell=parseFloat(r.putSell||r.short_put||0);
-  var putBuy=parseFloat(r.putBuy||r.long_put||0);
-  var callSell=parseFloat(r.callSell||r.short_call||0);
-  var callBuy=parseFloat(r.callBuy||r.long_call||0);
-
-  /* Replace the 4 static legs */
-  var tickDiv=box.querySelector('.ticket');
-  if(tickDiv){
-    tickDiv.innerHTML=
-      selHtml('putSell','Sell Put',putSell,spot,true)+
-      selHtml('putBuy','Buy Put',putBuy,spot,false)+
-      selHtml('callSell','Sell Call',callSell,spot,true)+
-      selHtml('callBuy','Buy Call',callBuy,spot,false);
-
-    /* Reset button row */
-    if(!document.getElementById('cr001-resetrow')){
-      tickDiv.insertAdjacentHTML('beforebegin',
-        '<div id="cr001-resetrow"><button id="cr001-reset" onclick="window.CR001_reset()">&#8635; Reset to Screener Baseline</button></div>');
-    }
-  }
-
-  /* Tag metric <strong> elements with IDs */
-  var tms=box.querySelectorAll('.ticket-math .tm');
-  tms.forEach(function(tm){
-    var sp=tm.querySelector('span'), st=tm.querySelector('strong');
-    if(!sp||!st) return;
-    var lbl=(sp.textContent||'').trim();
-    if(lbl==='Conservative Credit') st.id='cr-credit';
-    if(lbl==='Max Risk') st.id='cr-risk';
-    if(lbl==='ROC') st.id='cr-roc';
-  });
-
-  /* Add Break-Even row if not present */
-  var tm=box.querySelector('.ticket-math');
-  if(tm&&!document.getElementById('cr-lobe')){
-    tm.insertAdjacentHTML('beforeend',
-      '<div class="tm"><span>Lower Break-Even</span><strong id="cr-lobe">—</strong></div>'+
-      '<div class="tm"><span>Upper Break-Even</span><strong id="cr-hibe">—</strong></div>');
-  }
-
-  /* Validation banner */
-  if(!document.getElementById('cr001-banner')&&tm){
-    tm.insertAdjacentHTML('beforebegin','<div id="cr001-banner"></div>');
-  }
-
-  /* Find chart and wrap it for live updates */
-  if(!document.getElementById('condorChartWrap')){
-    var svgEl=box.querySelector('svg');
-    if(svgEl){
-      var wrap=svgEl.closest('div')||svgEl.parentElement;
-      if(wrap&&!wrap.id) wrap.id='condorChartWrap';
-    }
-  }
-
-  rebuildTicket();
-}
-window.CR001_injectSelectors=injectSelectors;
-
-/* CR001 hook moved into showTicket directly */
 
 })();
 </script></body></html>
