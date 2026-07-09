@@ -517,7 +517,7 @@ window.CR001_populate=function(){
     var sel=document.getElementById('leg-'+legId);
     if(!sel) return;
     var baseline=legs[legId].baseline, sym=legs[legId].sym;
-    var inc=strikeInc(spot);
+    var inc=5;
     sel.innerHTML='';
     for(var offset=-3;offset<=3;offset++){
       var strike=Math.round((baseline+offset*inc)*100)/100;
